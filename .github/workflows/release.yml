@@ -1,0 +1,143 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-rust:
+    runs-on: blaze/macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          # - aarch64-unknown-linux-gnu
+          # - x86_64-unknown-linux-gnu
+          # - x86_64-pc-windows-msvc
+          # - aarch64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable
+        env:
+          CARGO_INCREMENTAL: "1"
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+        if: ${{ runner.os != 'Windows' }}
+        with:
+          save-if: ${{ github.ref_name == 'main' }}
+          shared-key: ${{ matrix.target }}
+
+      - name: Cache xwin
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
+        if: ${{ contains(matrix.target, 'windows') }}
+        with:
+          path: ${{ github.workspace }}/.xwin-cache
+          key: ${{ matrix.target }}-xwin
+
+      - uses: mlugg/setup-zig@8d6198c65fb0feaa111df26e6b467fea8345e46f # v2.0.5
+        if: ${{ contains(matrix.target, 'linux') }}
+        with:
+          version: 0.14.1
+
+      - uses: taiki-e/install-action@ad95d4e02e061d4390c4b66ef5ed56c7fee3d2ce # v2.58.17
+        if: ${{ contains(matrix.target, 'linux') }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-zigbuild
+
+      - uses: taiki-e/install-action@ad95d4e02e061d4390c4b66ef5ed56c7fee3d2ce # v2.58.17
+        if: ${{ contains(matrix.target, 'windows') }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tool: cargo-xwin
+
+      - name: Install llvm
+        if: ${{ contains(matrix.target, 'windows') }}
+        run: brew install llvm
+
+      - name: Rustup Adds Target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Add musl target (x86_64)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-gnu' }}
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Add musl target (aarch64)
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: rustup target add aarch64-unknown-linux-musl
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          registry-url: "https://registry.npmjs.org"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm --filter=vite-plus build:binding --target ${{ matrix.target }} -x
+        env:
+          XWIN_CACHE_DIR: ${{ github.workspace }}/.xwin-cache
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bindings-${{ matrix.target }}
+          path: ./packages/cli/binding/*.node
+          if-no-files-found: error
+
+  Release:
+    runs-on: blaze/macos-latest
+    needs: build-rust
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Bootstrap
+        run: pnpm bootstrap-cli:ci
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: packages/global/dist
+          pattern: bindings-*
+          merge-multiple: true
+
+      - name: Build
+        run: vp run vite-plus#build:ts @voidzero-dev/global#build
+
+      # Download again because `@voidzero-dev/global#build` will cleanup the dist dir first
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: packages/global/dist
+          pattern: bindings-*
+          merge-multiple: true
+
+      - name: Set version
+        run: |
+          sed -i '' 's/"version": "0.0.0"/"version": "0.0.0-${{ github.sha }}"/' packages/global/package.json
+
+      - name: Publish
+        run: |
+          echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" >> ~/.npmrc
+          echo "@voidzero-dev:registry=https://npm.pkg.github.com/" >> ~/.npmrc
+          pnpm publish --filter=./packages/global --registry https://npm.pkg.github.com --no-git-checks
+        env:
+          NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
