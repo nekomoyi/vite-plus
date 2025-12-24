@@ -1,4 +1,4 @@
-> vp migration # migration should merge vite.config.ts and remove oxlintrc and oxfmtrc
+> vp migration # migration should rewrite imports to vite-plus
 ┌  Vite+ Migration
 │
 ●  Using default package manager: pnpm
@@ -7,38 +7,27 @@
 │
 ●  pnpm@<semver> installed
 │
-◆  ✅ Merged .oxlintrc.json into vite.config.ts
+◆  ✅ Rewrote imports in 2 file(s)
 │
-◆  ✅ Merged .oxfmtrc.json into vite.config.ts
-│
-◆  ✅ Rewrote imports in 1 file(s)
-│
-●    vite.config.ts
+●    test/hello.ts
+│    vitest.config.ts
 │
 └  ✨ Migration completed!
 
 
-> cat vite.config.ts # check vite.config.ts
+> cat vitest.config.ts # check vitest.config.ts
 import { join } from 'node:path';
 
-import react from '@vitejs/plugin-react';
+import { foo } from '@foo/vite-plugin-foo';
 import { playwright } from '@voidzero-dev/vite-plus/test/browser-playwright';
+import { server } from '@voidzero-dev/vite-plus/test/browser-playwright/context';
+import { preview } from '@voidzero-dev/vite-plus/test/browser-preview';
+import { webdriverio } from '@voidzero-dev/vite-plus/test/browser-webdriverio';
+import { userEvent } from '@voidzero-dev/vite-plus/test/browser/context';
 import { defineConfig } from '@voidzero-dev/vite-plus';
 
 export default defineConfig({
-  fmt: {
-    printWidth: 100,
-    tabWidth: 2,
-    semi: true,
-    singleQuote: true,
-    trailingComma: 'es5',
-  },
-  lint: {
-    rules: {
-      'no-unused-vars': 'error',
-    },
-  },
-  plugins: [react()],
+  plugins: [foo()],
   test: {
     dir: join(import.meta.dirname, 'test'),
     browser: {
@@ -51,35 +40,20 @@ export default defineConfig({
   },
 });
 
-> cat .oxlintrc.json && exit 1 || true # check .oxlintrc.json is removed
-cat: .oxlintrc.json: No such file or directory
-
-> cat .oxfmtrc.json && exit 1 || true # check .oxfmtrc.json is removed
-cat: .oxfmtrc.json: No such file or directory
-
 > cat package.json # check package.json
 {
+  "name": "migration-from-vitest",
   "devDependencies": {
     "vite": "npm:@voidzero-dev/vite-plus-core@latest",
     "vitest": "npm:@voidzero-dev/vite-plus-test@latest",
-    "@vitejs/plugin-react": "^4.2.0",
     "@voidzero-dev/vite-plus": "latest"
   },
   "scripts": {
-    "dev": "vite dev",
-    "build": "vite build",
     "test:run": "vite test run",
     "test:ui": "vite test --ui",
     "test:coverage": "vite test run --coverage",
     "test:watch": "vite test --watch",
-    "test": "vite test",
-    "lint": "vite lint",
-    "lint:fix": "vite lint --fix",
-    "lint:type-aware": "vite lint --type-aware",
-    "fmt": "vite fmt",
-    "fmt:fix": "vite fmt --fix",
-    "fmt:staged": "vite fmt --staged",
-    "fmt:staged:fix": "vite fmt --staged --fix"
+    "test": "vite test"
   },
   "pnpm": {
     "overrides": {
@@ -89,3 +63,15 @@ cat: .oxfmtrc.json: No such file or directory
   },
   "packageManager": "pnpm@<semver>"
 }
+
+> cat test/hello.ts # check test/hello.ts
+import { server } from '@voidzero-dev/vite-plus/test/browser-playwright/context';
+import { test, describe, expect, it } from '@voidzero-dev/vite-plus/test';
+
+const { readFile } = server.commands;
+
+describe('Hello', () => {
+  it('should return the correct result', () => {
+    expect(true).toBe(true);
+  });
+});
