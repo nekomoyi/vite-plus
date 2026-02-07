@@ -93,15 +93,17 @@ impl NodeProvider {
     /// Find a locally cached version that satisfies the version requirement.
     ///
     /// This checks the local cache directory for installed Node.js versions
-    /// and returns the highest version that satisfies the semver range.
+    /// and returns a version that satisfies the semver range. Prefers LTS
+    /// versions over non-LTS versions.
     ///
     /// # Arguments
     /// * `version_req` - A semver range requirement (e.g., "^20.18.0")
-    /// * `cache_dir` - The cache directory path (e.g., `~/.cache/vite/js_runtime`)
+    /// * `cache_dir` - The cache directory path (e.g., `~/.cache/vite-plus/js_runtime`)
     ///
     /// # Returns
-    /// The highest cached version that satisfies the requirement, or `None` if
-    /// no cached version matches.
+    /// The highest LTS cached version that satisfies the requirement, or the
+    /// highest non-LTS version if no LTS version matches, or `None` if no
+    /// cached version matches.
     ///
     /// # Errors
     /// Returns an error if the version requirement is invalid.
@@ -136,7 +138,29 @@ impl NodeProvider {
             }
         }
 
-        // Return highest matching version using semver comparison
+        if matching_versions.is_empty() {
+            return Ok(None);
+        }
+
+        // Fetch version index to check LTS status
+        let version_index = self.fetch_version_index().await?;
+
+        // Build a set of LTS versions for fast lookup
+        let lts_versions: std::collections::HashSet<String> = version_index
+            .iter()
+            .filter(|e| e.is_lts())
+            .map(|e| e.version.strip_prefix('v').unwrap_or(&e.version).to_string())
+            .collect();
+
+        // Prefer LTS: find highest LTS cached version first
+        let lts_max =
+            matching_versions.iter().filter(|v| lts_versions.contains(&v.to_string())).max();
+
+        if let Some(version) = lts_max {
+            return Ok(Some(version.to_string().into()));
+        }
+
+        // Fallback to highest non-LTS
         Ok(matching_versions.into_iter().max().map(|v| v.to_string().into()))
     }
 
@@ -151,43 +175,52 @@ impl NodeProvider {
     /// Fetch the version index from nodejs.org/dist/index.json with HTTP caching.
     ///
     /// Uses ETag-based conditional requests to minimize bandwidth when cache expires.
+    /// If a network error occurs and a local cache exists (even if expired), returns
+    /// the cached version with a warning log instead of failing.
     ///
     /// # Errors
     ///
-    /// Returns an error if the download fails or the JSON is invalid.
+    /// Returns an error only if the download fails and no local cache exists.
     pub async fn fetch_version_index(&self) -> Result<Vec<NodeVersionEntry>, Error> {
         let cache_dir = crate::cache::get_cache_dir()?;
         let cache_path = cache_dir.join("node/index_cache.json");
 
         // Try to load from cache
-        if let Some(cache) = load_cache(&cache_path).await {
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        let Some(cache) = load_cache(&cache_path).await else {
+            // No cache - must fetch
+            return self.fetch_and_cache(&cache_path).await;
+        };
 
-            // If cache is still fresh, use it
-            if now < cache.expires_at {
-                tracing::debug!(
-                    "Using cached version index (expires in {}s)",
-                    cache.expires_at - now
-                );
-                return Ok(cache.versions);
-            }
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
 
-            // Cache expired - try conditional request with ETag if available
-            if let Some(etag) = &cache.etag {
-                tracing::debug!("Cache expired, trying conditional request with ETag");
-                match self.fetch_with_etag(etag, &cache, &cache_path).await {
-                    Ok(versions) => return Ok(versions),
-                    Err(e) => {
-                        tracing::debug!("Conditional request failed: {e}, doing full fetch");
-                    }
+        // If cache is still fresh, use it
+        if now < cache.expires_at {
+            tracing::debug!("Using cached version index (expires in {}s)", cache.expires_at - now);
+            return Ok(cache.versions);
+        }
+
+        // Cache expired - try conditional request with ETag if available
+        if let Some(ref etag) = cache.etag {
+            tracing::debug!("Cache expired, trying conditional request with ETag");
+            match self.fetch_with_etag(etag, &cache, &cache_path).await {
+                Ok(versions) => return Ok(versions),
+                Err(e) => {
+                    // Network error with ETag request - return cached version
+                    tracing::warn!("Conditional request failed: {e}, using expired cache");
+                    return Ok(cache.versions);
                 }
-            } else {
-                tracing::debug!("Cache expired, no ETag available for conditional request");
             }
         }
 
-        // Full fetch
-        self.fetch_and_cache(&cache_path).await
+        // No ETag - try full fetch, fallback to cache
+        tracing::debug!("Cache expired, no ETag available for conditional request");
+        match self.fetch_and_cache(&cache_path).await {
+            Ok(versions) => Ok(versions),
+            Err(e) => {
+                tracing::warn!("Failed to fetch version index: {e}, using expired cache");
+                Ok(cache.versions)
+            }
+        }
     }
 
     /// Try conditional fetch with ETag, returns cached versions if 304
@@ -300,7 +333,11 @@ fn find_latest_lts_version(versions: &[NodeVersionEntry]) -> Result<Str, Error> 
     })
 }
 
-/// Resolve a version requirement to the highest matching version from a list.
+/// Resolve a version requirement to a matching version from a list.
+///
+/// Prefers LTS versions over non-LTS versions. Returns the highest LTS version
+/// that satisfies the range, or falls back to the highest non-LTS version if
+/// no LTS version matches.
 ///
 /// # Errors
 ///
@@ -311,17 +348,33 @@ fn resolve_version_from_list(
 ) -> Result<Str, Error> {
     let range = Range::parse(version_req)?;
 
-    let max_matching = versions
+    // Collect all matching versions with their LTS status
+    let matching_versions: Vec<(Version, &str, bool)> = versions
         .iter()
         .filter_map(|entry| {
             let version_str = entry.version.strip_prefix('v').unwrap_or(&entry.version);
-            Version::parse(version_str).ok().map(|v| (v, version_str))
+            Version::parse(version_str)
+                .ok()
+                .filter(|v| range.satisfies(v))
+                .map(|v| (v, version_str, entry.is_lts()))
         })
-        .filter(|(version, _)| range.satisfies(version))
-        .max_by(|(a, _), (b, _)| a.cmp(b));
+        .collect();
 
-    max_matching
-        .map(|(_, version_str)| version_str.into())
+    // Prefer LTS versions: find highest LTS first
+    let lts_max = matching_versions
+        .iter()
+        .filter(|(_, _, is_lts)| *is_lts)
+        .max_by(|(a, _, _), (b, _, _)| a.cmp(b));
+
+    if let Some((_, version_str, _)) = lts_max {
+        return Ok((*version_str).into());
+    }
+
+    // Fallback to highest non-LTS version
+    matching_versions
+        .into_iter()
+        .max_by(|(a, _, _), (b, _, _)| a.cmp(b))
+        .map(|(_, version_str, _)| version_str.into())
         .ok_or_else(|| Error::NoMatchingVersion { version_req: version_req.into() })
 }
 
@@ -891,5 +944,66 @@ fedcba987654  node-v22.13.1-win-x64.zip";
         // Test: ^20.20.0 should find nothing (20.20.0 exists but no binary)
         let result = provider.find_cached_version("^20.20.0", &cache_dir).await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_resolve_version_from_list_prefers_lts() {
+        use super::resolve_version_from_list;
+
+        let versions = vec![
+            NodeVersionEntry { version: "v25.5.0".into(), lts: LtsInfo::NotLts },
+            NodeVersionEntry { version: "v24.5.0".into(), lts: LtsInfo::Codename("Jod".into()) },
+            NodeVersionEntry { version: "v22.15.0".into(), lts: LtsInfo::Codename("Jod".into()) },
+            NodeVersionEntry { version: "v20.19.0".into(), lts: LtsInfo::Codename("Iron".into()) },
+        ];
+
+        // Should prefer highest LTS (v24.5.0) over non-LTS (v25.5.0)
+        let result = resolve_version_from_list(">=20.0.0", &versions).unwrap();
+        assert_eq!(result, "24.5.0");
+    }
+
+    #[test]
+    fn test_resolve_version_from_list_falls_back_to_non_lts() {
+        use super::resolve_version_from_list;
+
+        let versions = vec![
+            NodeVersionEntry { version: "v25.5.0".into(), lts: LtsInfo::NotLts },
+            NodeVersionEntry { version: "v25.4.0".into(), lts: LtsInfo::NotLts },
+        ];
+
+        // No LTS matches, should return highest non-LTS
+        let result = resolve_version_from_list(">24.9999.0", &versions).unwrap();
+        assert_eq!(result, "25.5.0");
+    }
+
+    #[test]
+    fn test_resolve_version_from_list_complex_range_prefers_lts() {
+        use super::resolve_version_from_list;
+
+        let versions = vec![
+            NodeVersionEntry { version: "v25.5.0".into(), lts: LtsInfo::NotLts },
+            NodeVersionEntry { version: "v24.5.0".into(), lts: LtsInfo::Codename("Jod".into()) },
+            NodeVersionEntry { version: "v22.15.0".into(), lts: LtsInfo::Codename("Jod".into()) },
+            NodeVersionEntry { version: "v20.19.0".into(), lts: LtsInfo::Codename("Iron".into()) },
+        ];
+
+        // ^20.19.0 || >=22.12.0 should prefer v24.5.0 (highest LTS) over v25.5.0
+        let result = resolve_version_from_list("^20.19.0 || >=22.12.0", &versions).unwrap();
+        assert_eq!(result, "24.5.0");
+    }
+
+    #[test]
+    fn test_resolve_version_from_list_only_matches_in_range_lts() {
+        use super::resolve_version_from_list;
+
+        let versions = vec![
+            NodeVersionEntry { version: "v25.5.0".into(), lts: LtsInfo::NotLts },
+            NodeVersionEntry { version: "v24.5.0".into(), lts: LtsInfo::Codename("Jod".into()) },
+            NodeVersionEntry { version: "v20.19.0".into(), lts: LtsInfo::Codename("Iron".into()) },
+        ];
+
+        // ^20.18.0 should return 20.19.0 (the only LTS in range)
+        let result = resolve_version_from_list("^20.18.0", &versions).unwrap();
+        assert_eq!(result, "20.19.0");
     }
 }
