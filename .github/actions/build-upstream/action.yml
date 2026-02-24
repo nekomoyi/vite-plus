@@ -21,7 +21,7 @@ runs:
       id: cache-key
       shell: bash
       run: |
-        echo "key=napi-binding-v2-${{ inputs.target }}-${{ env.RELEASE_BUILD }}-${{ env.DEBUG }}-${{ env.VERSION }}-${{ env.NPM_TAG }}-${{ hashFiles('packages/tools/.upstream-versions.json', 'Cargo.lock', 'crates/**/*.rs', 'crates/*/Cargo.toml', 'packages/*/binding/**/*.rs', 'packages/*/binding/Cargo.toml', 'Cargo.toml', '.cargo/config.toml', 'packages/cli/package.json', 'packages/cli/build.ts', 'packages/global/package.json', 'packages/global/build.ts') }}" >> $GITHUB_OUTPUT
+        echo "key=napi-binding-v3-${{ inputs.target }}-${{ env.RELEASE_BUILD }}-${{ env.DEBUG }}-${{ env.VERSION }}-${{ env.NPM_TAG }}-${{ hashFiles('packages/tools/.upstream-versions.json', 'Cargo.lock', 'crates/**/*.rs', 'crates/*/Cargo.toml', 'packages/cli/binding/**/*.rs', 'packages/cli/binding/Cargo.toml', 'Cargo.toml', '.cargo/config.toml', 'packages/cli/package.json', 'packages/cli/build.ts') }}" >> $GITHUB_OUTPUT
 
     # Cache NAPI bindings and Rust CLI binary (the slow parts, especially on Windows)
     - name: Restore NAPI binding cache
@@ -34,9 +34,6 @@ runs:
           packages/cli/binding/index.d.ts
           packages/cli/binding/index.cjs
           packages/cli/binding/index.d.cts
-          packages/global/binding/*.node
-          packages/global/binding/index.js
-          packages/global/binding/index.d.ts
           target/${{ inputs.target }}/release/vp
           target/${{ inputs.target }}/release/vp.exe
         key: ${{ steps.cache-key.outputs.key }}
@@ -48,19 +45,16 @@ runs:
         pnpm --filter @rolldown/pluginutils build
         pnpm --filter rolldown build-node
         pnpm --filter vite build-types
-        pnpm --filter=@voidzero-dev/vite-plus-core build
-        pnpm --filter=@voidzero-dev/vite-plus-test build
-        pnpm --filter=vite-plus build-ts
-        pnpm --filter=vite-plus-cli build-ts
+        pnpm --filter "@voidzero-dev/*" build
+        pnpm --filter vite-plus build-ts
 
     # NAPI builds - only run on cache miss (slow, especially on Windows)
-    # Must run before vite-plus/vite-plus-cli TypeScript builds which depend on the bindings
+    # Must run before vite-plus TypeScript builds which depend on the bindings
     - name: Build NAPI bindings (x86_64-linux)
       shell: bash
       if: steps.cache-restore.outputs.cache-hit != 'true' && inputs.target == 'x86_64-unknown-linux-gnu'
       run: |
         pnpm --filter=vite-plus build-native --target ${{ inputs.target }} --use-napi-cross
-        pnpm --filter=vite-plus-cli build-native --target ${{ inputs.target }} --use-napi-cross
       env:
         TARGET_CC: clang
         DEBUG: napi:*
@@ -70,7 +64,6 @@ runs:
       if: steps.cache-restore.outputs.cache-hit != 'true' && inputs.target == 'aarch64-unknown-linux-gnu'
       run: |
         pnpm --filter=vite-plus build-native --target ${{ inputs.target }} --use-napi-cross
-        pnpm --filter=vite-plus-cli build-native --target ${{ inputs.target }} --use-napi-cross
       env:
         TARGET_CC: clang
         TARGET_CFLAGS: '-D_BSD_SOURCE'
@@ -81,7 +74,6 @@ runs:
       if: steps.cache-restore.outputs.cache-hit != 'true' && !contains(inputs.target, 'linux')
       run: |
         pnpm --filter=vite-plus build-native --target ${{ inputs.target }}
-        pnpm --filter=vite-plus-cli build-native --target ${{ inputs.target }}
       env:
         DEBUG: napi:*
 
@@ -119,37 +111,23 @@ runs:
           packages/cli/binding/index.d.ts
           packages/cli/binding/index.cjs
           packages/cli/binding/index.d.cts
-          packages/global/binding/*.node
-          packages/global/binding/index.js
-          packages/global/binding/index.d.ts
           target/${{ inputs.target }}/release/vp
           target/${{ inputs.target }}/release/vp.exe
         key: ${{ steps.cache-key.outputs.key }}
-
-    # Copy Rust CLI binary to packages/global/bin/ (runs on both cache hit and miss)
-    - name: Copy Rust CLI binary
-      shell: bash
-      run: |
-        if [[ "${{ inputs.target }}" == *"windows"* ]]; then
-          cp target/${{ inputs.target }}/release/vp.exe packages/global/bin/vp.exe
-        else
-          cp target/${{ inputs.target }}/release/vp packages/global/bin/vp
-        fi
 
     # Build vite-plus TypeScript after native bindings are ready
     - name: Build vite-plus TypeScript packages
       shell: bash
       run: |
         pnpm --filter=vite-plus build-ts
-        pnpm --filter=vite-plus-cli build-ts
 
     - name: Print output after build
       shell: bash
       if: inputs.print-after-build == 'true'
       run: |
-        pnpm vite -h
-        pnpm vite run -h
-        pnpm vite lint -h
-        pnpm vite test -h
-        pnpm vite build -h
-        pnpm vite fmt -h
+        pnpm vp -h
+        pnpm vp run -h
+        pnpm vp lint -h
+        pnpm vp test -h
+        pnpm vp build -h
+        pnpm vp fmt -h

@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
-      - 'packages/global/install.sh'
-      - 'packages/global/install.ps1'
+      - 'packages/cli/install.sh'
+      - 'packages/cli/install.ps1'
       - '.github/workflows/test-standalone-install.yml'
 
 concurrency:
@@ -17,6 +17,9 @@ concurrency:
 defaults:
   run:
     shell: bash
+
+env:
+  VITE_PLUS_VERSION: test
 
 jobs:
   test-install-sh:
@@ -38,7 +41,7 @@ jobs:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
       - name: Run install.sh
-        run: cat packages/global/install.sh | bash
+        run: cat packages/cli/install.sh | bash
 
       - name: Verify installation
         working-directory: ${{ runner.temp }}
@@ -66,7 +69,7 @@ jobs:
           vp --help
           # test new command
           vp create vite --no-interactive --no-agent -- hello --no-interactive -t vanilla
-          cd hello && vp run build
+          cd hello && vp run build && vp --version
 
       - name: Set PATH
         shell: bash
@@ -105,7 +108,7 @@ jobs:
         run: |
           # --check queries npm registry and prints update status
           vp upgrade --check
-          vp upgrade 0.0.0-b356849c.20260207-0631
+          vp upgrade 0.0.0-f74442ad.20260222-0755
           vp --version
           # rollback to the previous version (should succeed after a real update)
           vp upgrade --rollback
@@ -128,10 +131,11 @@ jobs:
         run: |
           docker run --rm --platform linux/arm64 \
             -v "${{ github.workspace }}:/workspace" \
+            -e VITE_PLUS_VERSION=test \
             ubuntu:20.04 bash -c "
               ls -al ~/
               apt-get update && apt-get install -y curl ca-certificates
-              cat /workspace/packages/global/install.sh | bash
+              cat /workspace/packages/cli/install.sh | bash
               if [ -f ~/.profile ]; then
                 source ~/.profile
               elif [ -f ~/.bashrc ]; then
@@ -164,7 +168,7 @@ jobs:
 
               # Verify upgrade
               vp upgrade --check
-              vp upgrade 0.0.0-b356849c.20260207-0631
+              vp upgrade 0.0.0-f74442ad.20260222-0755
               vp --version
               vp upgrade --rollback
               vp --version
@@ -185,7 +189,7 @@ jobs:
       - name: Run install.ps1
         shell: pwsh
         run: |
-          & ./packages/global/install.ps1
+          & ./packages/cli/install.ps1
 
       - name: Set PATH
         shell: bash
@@ -197,7 +201,7 @@ jobs:
         run: |
           # --check queries npm registry and prints update status
           vp upgrade --check
-          vp upgrade 0.0.0-b356849c.20260207-0631
+          vp upgrade 0.0.0-f74442ad.20260222-0755
           vp --version
           # rollback to the previous version (should succeed after a real update)
           vp upgrade --rollback
@@ -214,7 +218,7 @@ jobs:
           # $env:VITE_LOG = "trace"
           # test new command
           vp create vite --no-interactive --no-agent -- hello --no-interactive -t vanilla
-          cd hello && vp run build
+          cd hello && vp run build && vp --version
 
       - name: Verify bin setup on powershell
         shell: pwsh
@@ -257,7 +261,7 @@ jobs:
 
           REM test new command
           vp create vite --no-interactive --no-agent -- hello-cmd --no-interactive -t vanilla
-          cd hello-cmd && vp run build
+          cd hello-cmd && vp run build && vp --version
 
       - name: Verify bin setup on cmd
         shell: cmd
@@ -296,7 +300,7 @@ jobs:
           vp --help
           # test new command
           vp create vite --no-interactive --no-agent -- hello-bash --no-interactive -t vanilla
-          cd hello-bash && vp run build
+          cd hello-bash && vp run build && vp --version
 
       - name: Verify bin setup on bash
         shell: bash

@@ -55,16 +55,16 @@ impl JsExecutor {
         }
 
         // 3. Auto-detect from binary location
-        // JS scripts are at ../dist relative to bin/
-        // e.g., packages/global/bin/vp -> packages/global/dist/
+        // JS scripts are at ../node_modules/vite-plus/dist relative to the binary directory
+        // e.g., ~/.vite-plus/<version>/bin/vp -> ~/.vite-plus/<version>/node_modules/vite-plus/dist/
         let exe_path = std::env::current_exe().map_err(|_| Error::JsScriptsDirNotFound)?;
         // Resolve symlinks to get the real binary path (Unix only)
         // Skip on Windows to avoid path resolution issues
         #[cfg(unix)]
         let exe_path = std::fs::canonicalize(&exe_path).map_err(|_| Error::JsScriptsDirNotFound)?;
         let bin_dir = exe_path.parent().ok_or(Error::JsScriptsDirNotFound)?;
-        let package_dir = bin_dir.parent().ok_or(Error::JsScriptsDirNotFound)?;
-        let scripts_dir = package_dir.join("dist");
+        let version_dir = bin_dir.parent().ok_or(Error::JsScriptsDirNotFound)?;
+        let scripts_dir = version_dir.join("node_modules").join("vite-plus").join("dist");
 
         AbsolutePathBuf::new(scripts_dir).ok_or(Error::JsScriptsDirNotFound)
     }
@@ -111,7 +111,7 @@ impl JsExecutor {
     /// from `devEngines.runtime` in the CLI's package.json.
     fn get_cli_package_dir(&self) -> Result<AbsolutePathBuf, Error> {
         let scripts_dir = self.get_scripts_dir()?;
-        // scripts_dir is typically packages/global/dist, so parent is packages/global
+        // scripts_dir is typically packages/cli/dist, so parent is packages/cli
         scripts_dir
             .parent()
             .map(vite_path::AbsolutePath::to_absolute_path_buf)
@@ -157,55 +157,15 @@ impl JsExecutor {
         Ok(download_runtime(JsRuntimeType::Node, version).await?)
     }
 
-    /// Execute a CLI bundled JS script (Category B commands).
+    /// Delegate to local or global vite-plus CLI.
     ///
-    /// # Arguments
-    /// * `script_name` - Name of the script file (e.g., "index.js")
-    /// * `command` - Command to pass to the script (e.g., "new", "migrate")
-    /// * `args` - Additional arguments for the command
-    /// * `cwd` - Working directory for the script execution
-    pub async fn execute_cli_script(
-        &mut self,
-        script_name: &str,
-        command: &str,
-        args: &[String],
-        cwd: &AbsolutePath,
-    ) -> Result<ExitStatus, Error> {
-        let scripts_dir = self.get_scripts_dir()?;
-        let script_path = scripts_dir.join(script_name);
-
-        if !tokio::fs::try_exists(script_path.as_path()).await.unwrap_or(false) {
-            return Err(Error::JsEntryPointNotFound(format!("{script_path:?}").into()));
-        }
-
-        let runtime = self.ensure_cli_runtime().await?;
-        let binary_path = runtime.get_binary_path();
-        let bin_prefix = runtime.get_bin_prefix();
-
-        tracing::debug!(
-            "Executing CLI script: {:?} {:?} {:?} {:?} in {:?}",
-            binary_path,
-            script_path,
-            command,
-            args,
-            cwd
-        );
-
-        let mut cmd = Self::create_js_command(&binary_path, &bin_prefix);
-        cmd.arg(script_path.as_path()).arg(command).args(args).current_dir(cwd.as_path());
-
-        let status = cmd.status().await?;
-        Ok(status)
-    }
-
-    /// Delegate to local vite-plus CLI (Category C commands).
+    /// Uses `oxc_resolver` to find the project's local vite-plus installation.
+    /// If found, runs the local `dist/bin.js` directly. Otherwise, falls back
+    /// to the global installation's `dist/bin.js`.
     ///
-    /// Uses the project's runtime version via `download_runtime_for_project`.
-    /// Passes the command through `dist/index.js` which handles:
-    /// - Detecting if vite-plus is installed locally
-    /// - Auto-installing if it's a dependency but not installed
-    /// - Prompting user to add it if not found
-    /// - Delegating to the local CLI's `dist/bin.js`
+    /// Uses the project's runtime (from its `devEngines.runtime` configuration).
+    /// This may write a `.node-version` file if the project has no version source.
+    /// For side-effect-free commands like `--version`, use [`delegate_with_cli_runtime`] instead.
     ///
     /// # Arguments
     /// * `project_path` - Path to the project directory
@@ -219,20 +179,76 @@ impl JsExecutor {
         let runtime = self.ensure_project_runtime(project_path).await?;
         let node_binary = runtime.get_binary_path();
         let bin_prefix = runtime.get_bin_prefix();
+        self.run_js_entry(project_path, &node_binary, &bin_prefix, args).await
+    }
 
-        // Get the JS entry point (dist/index.js)
-        let scripts_dir = self.get_scripts_dir()?;
-        let entry_point = scripts_dir.join("index.js");
+    /// Delegate to local or global vite-plus CLI using the CLI's own runtime.
+    ///
+    /// Like [`delegate_to_local_cli`], but uses the CLI's bundled runtime
+    /// (from its own `devEngines.runtime` in `package.json`) instead of the
+    /// project's runtime. This avoids side effects like writing `.node-version`
+    /// when no version source exists in the project directory.
+    ///
+    /// Use this for read-only / side-effect-free commands like `--version`.
+    pub async fn delegate_with_cli_runtime(
+        &mut self,
+        project_path: &AbsolutePath,
+        args: &[String],
+    ) -> Result<ExitStatus, Error> {
+        let runtime = self.ensure_cli_runtime().await?;
+        let node_binary = runtime.get_binary_path();
+        let bin_prefix = runtime.get_bin_prefix();
+        self.run_js_entry(project_path, &node_binary, &bin_prefix, args).await
+    }
 
-        tracing::debug!("Delegating to local CLI via JS entry point: {:?} {:?}", entry_point, args);
+    /// Run a JS entry point with the given runtime, resolving local vite-plus first.
+    async fn run_js_entry(
+        &self,
+        project_path: &AbsolutePath,
+        node_binary: &AbsolutePath,
+        bin_prefix: &AbsolutePath,
+        args: &[String],
+    ) -> Result<ExitStatus, Error> {
+        // Try to resolve vite-plus from the project directory using oxc_resolver
+        let entry_point = match Self::resolve_local_vite_plus(project_path) {
+            Some(path) => path,
+            None => {
+                // Fall back to the global installation's bin.js
+                let scripts_dir = self.get_scripts_dir()?;
+                scripts_dir.join("bin.js")
+            }
+        };
 
-        // Execute dist/index.js with the command and args
-        // The JS layer handles detecting/installing local vite-plus
-        let mut cmd = Self::create_js_command(&node_binary, &bin_prefix);
+        tracing::debug!("Delegating to CLI via JS entry point: {:?} {:?}", entry_point, args);
+
+        let mut cmd = Self::create_js_command(node_binary, bin_prefix);
         cmd.arg(entry_point.as_path()).args(args).current_dir(project_path.as_path());
 
         let status = cmd.status().await?;
         Ok(status)
+    }
+
+    /// Resolve the local vite-plus package's `dist/bin.js` from the project directory.
+    fn resolve_local_vite_plus(project_path: &AbsolutePath) -> Option<AbsolutePathBuf> {
+        use oxc_resolver::{ResolveOptions, Resolver};
+
+        let resolver = Resolver::new(ResolveOptions {
+            condition_names: vec!["import".into(), "node".into()],
+            ..ResolveOptions::default()
+        });
+
+        // Resolve vite-plus/package.json from the project directory to find the package root
+        let resolved = resolver.resolve(project_path, "vite-plus/package.json").ok()?;
+        let pkg_dir = resolved.path().parent()?;
+        let bin_js = pkg_dir.join("dist").join("bin.js");
+
+        if bin_js.exists() {
+            tracing::debug!("Found local vite-plus at {:?}", bin_js);
+            AbsolutePathBuf::new(bin_js)
+        } else {
+            tracing::debug!("Local vite-plus found but dist/bin.js missing at {:?}", bin_js);
+            None
+        }
     }
 }
 
@@ -288,26 +304,25 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_execute_cli_script_prints_node_version() {
+    async fn test_delegate_to_local_cli_prints_node_version() {
         use std::io::Write;
 
         use tempfile::TempDir;
 
-        // Create a temporary directory for the scripts
+        // Create a temporary directory for the scripts (used as fallback global dir)
         let temp_dir = TempDir::new().unwrap();
         let scripts_dir = AbsolutePathBuf::new(temp_dir.path().to_path_buf()).unwrap();
 
-        // Create a simple JS script that prints process.version
-        let script_path = temp_dir.path().join("test-version.js");
+        // Create a bin.js that prints process.version
+        let script_path = temp_dir.path().join("bin.js");
         let mut file = std::fs::File::create(&script_path).unwrap();
         writeln!(file, "console.log(process.version);").unwrap();
 
-        // Create executor with the temp scripts directory
+        // Create executor with the temp scripts directory as global fallback
         let mut executor = JsExecutor::new(Some(scripts_dir.clone()));
 
-        // Execute the script
-        let status =
-            executor.execute_cli_script("test-version.js", "", &[], &scripts_dir).await.unwrap();
+        // Delegate — no local vite-plus will be found, so it falls back to global bin.js
+        let status = executor.delegate_to_local_cli(&scripts_dir, &[]).await.unwrap();
 
         assert!(status.success(), "Script should execute successfully");
     }

@@ -625,5 +625,5 @@ vp -V
 - [RFC: Global CLI (Rust Binary)](./global-cli-rust-binary.md)
 - [RFC: Split Global CLI](./split-global-cli.md)
 - [RFC: Env Command](./env-command.md)
-- [Install Script](../packages/global/install.sh)
+- [Install Script](../packages/cli/install.sh)
 - [Release Workflow](../.github/workflows/release.yml)

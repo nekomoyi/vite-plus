@@ -1,12 +1,13 @@
 /**
- * Entry point for the vite-plus CLI.
+ * Unified entry point for both the local CLI (via bin/vp) and the global CLI (via Rust vp binary).
  *
- * This file initializes the CLI by passing JavaScript tool resolver functions
- * to the Rust core through NAPI bindings. Each resolver function is responsible
- * for locating the binary path of its respective tool using Node.js module resolution.
+ * Global commands (create, migrate, --version) are handled by rolldown-bundled modules.
+ * All other commands are delegated to the Rust core through NAPI bindings, which
+ * uses JavaScript tool resolver functions to locate tool binaries.
  *
- * The Rust core will call these functions when it needs to execute the corresponding
- * tools (e.g., when running `vite-plus build`, it calls the vite resolver).
+ * When called from the global CLI, the Rust binary resolves the project's local
+ * vite-plus installation using oxc_resolver and runs its dist/bin.js directly.
+ * If no local installation is found, this global dist/bin.js is used as fallback.
  */
 
 import { run } from '../binding/index.js';
@@ -18,23 +19,45 @@ import { test } from './resolve-test.js';
 import { resolveUniversalViteConfig } from './resolve-vite-config.js';
 import { vite } from './resolve-vite.js';
 
-// Initialize the CLI with tool resolvers
-// These functions will be called from Rust when needed
-run({
-  lint, // Resolves oxlint binary for linting
-  pack, // Resolves tsdown binary for pack bundling
-  fmt, // Resolves oxfmt binary for formatting
-  vite, // Resolves vite binary for build/dev commands
-  test, // Resolves vitest binary for test commands
-  doc, // Resolves vitepress binary for doc commands
-  resolveUniversalViteConfig,
-  // Pass CLI arguments to Rust (skip node binary and script path)
-  args: process.argv.slice(2),
-})
-  .then((exitCode) => {
-    process.exit(exitCode);
+// Parse command line arguments
+let args = process.argv.slice(2);
+
+// Transform `vp help [command]` into `vp [command] --help`
+if (args[0] === 'help' && args[1]) {
+  args = [args[1], '--help', ...args.slice(2)];
+  process.argv = process.argv.slice(0, 2).concat(args);
+}
+
+const command = args[0];
+
+// Global commands — handled by rolldown-bundled modules in dist/global/
+// These modules only exist after rolldown bundles them, so TS cannot resolve them.
+if (command === 'create') {
+  // @ts-ignore — rolldown output
+  await import('./global/create.js');
+} else if (command === 'migrate') {
+  // @ts-ignore — rolldown output
+  await import('./global/migrate.js');
+} else if (command === '--version' || command === '-V') {
+  // @ts-ignore — rolldown output
+  await import('./global/version.js');
+} else {
+  // All other commands — delegate to Rust core via NAPI binding
+  run({
+    lint,
+    pack,
+    fmt,
+    vite,
+    test,
+    doc,
+    resolveUniversalViteConfig,
+    args: process.argv.slice(2),
   })
-  .catch((err) => {
-    console.error('[Vite+] run error:', err);
-    process.exit(1);
-  });
+    .then((exitCode) => {
+      process.exit(exitCode);
+    })
+    .catch((err) => {
+      console.error('[Vite+] run error:', err);
+      process.exit(1);
+    });
+}

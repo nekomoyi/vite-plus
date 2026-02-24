@@ -1,11 +1,12 @@
 /**
  * Build script for vite-plus CLI package
  *
- * This script performs four main tasks:
- * 1. buildNapiBinding() - Builds the native Rust binding via NAPI
- * 2. buildCli() - Compiles TypeScript sources
- * 3. syncCorePackageExports() - Creates shim files to re-export from @voidzero-dev/vite-plus-core
- * 4. syncTestPackageExports() - Creates shim files to re-export from @voidzero-dev/vite-plus-test
+ * This script performs five main tasks:
+ * 1. buildCli() - Compiles TypeScript sources (local CLI) via tsc
+ * 2. buildGlobalModules() - Bundles global CLI modules (create, migrate, version) via rolldown
+ * 3. buildNapiBinding() - Builds the native Rust binding via NAPI
+ * 4. syncCorePackageExports() - Creates shim files to re-export from @voidzero-dev/vite-plus-core
+ * 5. syncTestPackageExports() - Creates shim files to re-export from @voidzero-dev/vite-plus-test
  *
  * The sync functions allow this package to be a drop-in replacement for 'vite' by
  * re-exporting all the same subpaths (./client, ./types/*, etc.) while delegating
@@ -15,7 +16,8 @@
  * Native binding is built first because TypeScript may depend on generated binding types.
  */
 
-import { existsSync, globSync, readdirSync, statSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { existsSync, globSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +56,7 @@ const napiArgs = process.argv
 
 if (!skipTs) {
   await buildCli();
+  buildGlobalModules();
 }
 // Build native first - TypeScript may depend on the generated binding types
 if (!skipNative) {
@@ -153,7 +156,17 @@ async function buildCli() {
   const host = createCompilerHost(options);
 
   const program = createProgram({
-    rootNames: globSync('src/**/*.{ts,cts}', { cwd: projectDir, exclude: ['**/*/__tests__'] }),
+    rootNames: globSync('src/**/*.{ts,cts}', {
+      cwd: projectDir,
+      exclude: [
+        '**/*/__tests__',
+        // Global CLI modules — bundled by rolldown instead of tsc
+        'src/create/**',
+        'src/migration/**',
+        'src/version.ts',
+        'src/types/**',
+      ],
+    }),
     options,
     host,
   });
@@ -163,6 +176,46 @@ async function buildCli() {
   if (diagnostics.length > 0) {
     console.error(formatDiagnostics(diagnostics, host));
     process.exit(1);
+  }
+}
+
+function buildGlobalModules() {
+  execSync('npx rolldown -c rolldown.config.ts', {
+    cwd: projectDir,
+    stdio: 'inherit',
+  });
+  validateGlobalBundleExternals();
+}
+
+/**
+ * Scan rolldown output for unbundled workspace package imports.
+ *
+ * Rolldown silently externalizes imports it can't resolve (no error, no warning).
+ * If a workspace package's dist doesn't exist at bundle time (build order race,
+ * clean checkout, etc.), the bare specifier stays in the output. Since these
+ * packages are devDependencies — not installed in the global CLI's node_modules —
+ * this causes a runtime ERR_MODULE_NOT_FOUND crash.
+ *
+ * Fail the build loudly instead of producing a broken install.
+ */
+function validateGlobalBundleExternals() {
+  const globalDir = join(projectDir, 'dist/global');
+  const files = globSync('*.js', { cwd: globalDir });
+  const errors: string[] = [];
+
+  for (const file of files) {
+    const content = readFileSync(join(globalDir, file), 'utf8');
+    const matches = content.matchAll(/\bimport\s.*?from\s+["'](@voidzero-dev\/[^"']+)["']/g);
+    for (const match of matches) {
+      errors.push(`  ${file}: unbundled import of "${match[1]}"`);
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `Rolldown failed to bundle workspace packages in dist/global/:\n${errors.join('\n')}\n` +
+        `Ensure these packages are built before running the CLI build.`,
+    );
   }
 }
 

@@ -2,8 +2,5 @@
   "env": {
     "VITE_DISABLE_AUTO_INSTALL": "1"
   },
-  "commands": [
-    "vite run install # install shortcut",
-    "vite run install # install shortcut hit cache"
-  ]
+  "commands": ["vp run install # install shortcut", "vp run install # install shortcut hit cache"]
 }

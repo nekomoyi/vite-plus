@@ -1,5 +1,14 @@
 import { execSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,13 +51,12 @@ export function installGlobalCli() {
     console.log(`Using provided tgz: ${tgzPath}`);
   } else {
     // Create temp directory for pnpm pack output
-    tempDir = mkdtempSync(path.join(os.tmpdir(), 'vite-plus-cli-'));
+    tempDir = mkdtempSync(path.join(os.tmpdir(), 'vite-plus-'));
 
     // Use pnpm pack to create tarball
     // - Auto-resolves catalog: dependencies
-    // - Includes binary (already in packages/global/bin/ after copy-vp-binary)
     execSync(`pnpm pack --pack-destination "${tempDir}"`, {
-      cwd: path.join(repoRoot, 'packages/global'),
+      cwd: path.join(repoRoot, 'packages/cli'),
       stdio: 'inherit',
     });
 
@@ -63,16 +71,30 @@ export function installGlobalCli() {
   try {
     const installDir = path.join(os.homedir(), '.vite-plus');
 
+    // Locate the Rust vp binary (built by cargo or copied by CI)
+    const binaryName = isWindows ? 'vp.exe' : 'vp';
+    const binaryPath = findVpBinary(binaryName);
+    if (!binaryPath) {
+      console.error(`Error: vp binary not found in ${path.join(repoRoot, 'target')}`);
+      console.error('Run "cargo build -p vite_global_cli --release" first.');
+      process.exit(1);
+    }
+
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
       VITE_PLUS_LOCAL_TGZ: tgzPath,
+      VITE_PLUS_LOCAL_BINARY: binaryPath,
       VITE_PLUS_HOME: installDir,
       VITE_PLUS_VERSION: 'local-dev',
       CI: 'true',
+      // Skip vp install in install.sh — we handle deps ourselves:
+      // - Local dev: symlink monorepo node_modules
+      // - CI (--tgz): rewrite @voidzero-dev/* deps to file: protocol and npm install
+      VITE_PLUS_SKIP_DEPS_INSTALL: '1',
     };
 
     // Run platform-specific install script (use absolute paths)
-    const installScriptDir = path.join(repoRoot, 'packages/global');
+    const installScriptDir = path.join(repoRoot, 'packages/cli');
     if (isWindows) {
       // Use pwsh (PowerShell Core) for better UTF-8 handling
       const ps1Path = path.join(installScriptDir, 'install.ps1');
@@ -87,11 +109,145 @@ export function installGlobalCli() {
         env,
       });
     }
-    // install.sh/install.ps1 already creates the correct symlinks and wrappers for vp
+
+    // Set up node_modules for local dev by rewriting workspace deps to file: protocol
+    // and running pnpm install. Production installs use `vp install` in install.sh directly.
+    const versionDir = path.join(installDir, 'local-dev');
+    if (values.tgz) {
+      installCiDeps(versionDir, tgzPath);
+    } else {
+      setupLocalDevDeps(versionDir);
+    }
   } finally {
     // Cleanup temp dir only if we created it
     if (tempDir) {
       rmSync(tempDir, { recursive: true, force: true });
+    }
+  }
+}
+
+// Find the vp binary in the target directory.
+// Checks target/release/ first (local builds), then target/<triple>/release/ (cross-compiled CI builds).
+function findVpBinary(binaryName: string) {
+  // 1. Direct release build: target/release/vp
+  const directPath = path.join(repoRoot, 'target', 'release', binaryName);
+  if (existsSync(directPath)) {
+    return directPath;
+  }
+
+  // 2. Cross-compiled build: target/<triple>/release/vp (CI builds with --target)
+  const targetDir = path.join(repoRoot, 'target');
+  if (existsSync(targetDir)) {
+    for (const entry of readdirSync(targetDir)) {
+      const crossPath = path.join(targetDir, entry, 'release', binaryName);
+      if (existsSync(crossPath)) {
+        return crossPath;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Install dependencies for CI by generating a wrapper package.json with file: protocol
+ * references to the main tgz and sibling @voidzero-dev/* tgz files, then running npm install.
+ */
+function installCiDeps(versionDir: string, mainTgzPath: string) {
+  const tgzDir = path.dirname(mainTgzPath);
+
+  // Extract vite-plus's package.json from the tgz to find @voidzero-dev/* deps
+  // On Windows, use the system tar (bsdtar) which handles Windows paths natively.
+  // Git Bash's GNU tar misinterprets drive letters (D:, C:) as remote host references,
+  // affecting both the archive path and the -C directory argument.
+  const tar = isWindows ? `"${process.env.SystemRoot}\\System32\\tar.exe"` : 'tar';
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'vp-deps-'));
+  try {
+    execSync(`${tar} xzf "${mainTgzPath}" -C "${tempDir}" --strip-components=1 package.json`, {
+      stdio: 'pipe',
+    });
+  } catch {
+    // If extracting just package.json fails, extract everything
+    execSync(`${tar} xzf "${mainTgzPath}" -C "${tempDir}" --strip-components=1`, {
+      stdio: 'pipe',
+    });
+  }
+  const vitePlusPkg = JSON.parse(readFileSync(path.join(tempDir, 'package.json'), 'utf-8'));
+  rmSync(tempDir, { recursive: true, force: true });
+
+  // Build wrapper deps: vite-plus from tgz + @voidzero-dev/* from sibling tgz files
+  const wrapperDeps: Record<string, string> = {
+    'vite-plus': `file:${mainTgzPath}`,
+  };
+
+  const vitePlusDeps: Record<string, string> = vitePlusPkg.dependencies ?? {};
+  for (const [name, version] of Object.entries(vitePlusDeps)) {
+    if (!name.startsWith('@voidzero-dev/')) {
+      continue;
+    }
+    // @voidzero-dev/vite-plus-core@0.0.0 -> voidzero-dev-vite-plus-core-0.0.0.tgz
+    const tgzName = name.replace('@', '').replace('/', '-') + `-${version}.tgz`;
+    const tgzFilePath = path.join(tgzDir, tgzName);
+    if (existsSync(tgzFilePath)) {
+      wrapperDeps[name] = `file:${tgzFilePath}`;
+      console.log(`  ${name}: ${version} -> file:${tgzFilePath}`);
+    } else {
+      console.warn(`Warning: tgz not found for ${name}@${version}: ${tgzFilePath}`);
+    }
+  }
+
+  const wrapperPkg = {
+    name: 'vp-global',
+    version: '0.0.0',
+    private: true,
+    dependencies: wrapperDeps,
+  };
+
+  writeFileSync(path.join(versionDir, 'package.json'), JSON.stringify(wrapperPkg, null, 2) + '\n');
+
+  execSync('npm install --no-audit --no-fund --legacy-peer-deps', {
+    cwd: versionDir,
+    stdio: 'inherit',
+  });
+}
+
+/**
+ * Set up dependencies for local dev by symlinking into node_modules.
+ *
+ * Creates node_modules/vite-plus → packages/cli (source) and symlinks
+ * transitive deps from packages/cli/node_modules into version_dir/node_modules.
+ */
+function setupLocalDevDeps(versionDir: string) {
+  const nodeModulesDir = path.join(versionDir, 'node_modules');
+  rmSync(nodeModulesDir, { recursive: true, force: true });
+  mkdirSync(nodeModulesDir, { recursive: true });
+
+  // Symlink node_modules/vite-plus → packages/cli (source)
+  const cliDir = path.join(repoRoot, 'packages', 'cli');
+  symlinkSync(cliDir, path.join(nodeModulesDir, 'vite-plus'), 'dir');
+
+  // Symlink transitive deps from packages/cli/node_modules
+  const cliNodeModules = path.join(cliDir, 'node_modules');
+  if (!existsSync(cliNodeModules)) {
+    return;
+  }
+
+  for (const entry of readdirSync(cliNodeModules)) {
+    if (entry === '.pnpm' || entry === '.modules.yaml') {
+      continue;
+    }
+    const src = path.join(cliNodeModules, entry);
+    const dest = path.join(nodeModulesDir, entry);
+    if (!existsSync(dest)) {
+      // Handle scoped packages (@scope/) by creating parent dir
+      if (entry.startsWith('@')) {
+        mkdirSync(dest, { recursive: true });
+        for (const sub of readdirSync(src)) {
+          symlinkSync(path.join(src, sub), path.join(dest, sub), 'dir');
+        }
+      } else {
+        symlinkSync(src, dest, 'dir');
+      }
     }
   }
 }

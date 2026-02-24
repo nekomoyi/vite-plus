@@ -1,18 +1,14 @@
-//! Project scaffolding command (Category B: JS Script Command).
+//! Project scaffolding command (Category B: JavaScript Command).
 
 use std::process::ExitStatus;
 
 use vite_path::AbsolutePathBuf;
 
-use crate::{error::Error, js_executor::JsExecutor};
+use crate::error::Error;
 
-/// Execute the `create` command by delegating to the bundled JavaScript implementation.
+/// Execute the `create` command by delegating to local or global vite-plus.
 pub async fn execute(cwd: AbsolutePathBuf, args: &[String]) -> Result<ExitStatus, Error> {
-    let mut executor = JsExecutor::new(None);
-
-    // Execute the bundled JS script with the "create" command
-    // The JS script handles all argument parsing, template discovery, and execution
-    executor.execute_cli_script("index.js", "create", args, &cwd).await
+    super::delegate::execute(cwd, "create", args).await
 }
 
 #[cfg(test)]

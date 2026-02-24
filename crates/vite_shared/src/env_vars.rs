@@ -63,3 +63,6 @@ pub const VITE_PLUS_SHIM_TOOL: &str = "VITE_PLUS_SHIM_TOOL";
 
 /// Path to the vp binary, passed to JS scripts so they can invoke CLI commands.
 pub const VITE_PLUS_CLI_BIN: &str = "VITE_PLUS_CLI_BIN";
+
+/// Global CLI version, passed from Rust binary to JS for --version display.
+pub const VITE_PLUS_GLOBAL_VERSION: &str = "VITE_PLUS_GLOBAL_VERSION";

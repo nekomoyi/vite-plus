@@ -1,18 +1,14 @@
-//! Migration command (Category B: JS Script Command).
+//! Migration command (Category B: JavaScript Command).
 
 use std::process::ExitStatus;
 
 use vite_path::AbsolutePathBuf;
 
-use crate::{error::Error, js_executor::JsExecutor};
+use crate::error::Error;
 
-/// Execute the `migrate` command by delegating to the bundled JavaScript implementation.
+/// Execute the `migrate` command by delegating to local or global vite-plus.
 pub async fn execute(cwd: AbsolutePathBuf, args: &[String]) -> Result<ExitStatus, Error> {
-    let mut executor = JsExecutor::new(None);
-
-    // Execute the bundled JS script with the "migrate" command
-    // The JS script handles all migration logic
-    executor.execute_cli_script("index.js", "migrate", args, &cwd).await
+    super::delegate::execute(cwd, "migrate", args).await
 }
 
 #[cfg(test)]

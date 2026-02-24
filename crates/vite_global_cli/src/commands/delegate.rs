@@ -1,4 +1,4 @@
-//! Local CLI delegation (Category C: Local CLI Command).
+//! JavaScript command delegation — resolves local vite-plus first, falls back to global.
 
 use std::process::ExitStatus;
 

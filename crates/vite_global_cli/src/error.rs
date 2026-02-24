@@ -25,9 +25,6 @@ pub enum Error {
     #[error("Failed to determine CLI binary path")]
     CliBinaryNotFound,
 
-    #[error("JS entry point not found at {0}")]
-    JsEntryPointNotFound(Str),
-
     #[error("Workspace error: {0}")]
     Workspace(#[from] vite_workspace::Error),
 

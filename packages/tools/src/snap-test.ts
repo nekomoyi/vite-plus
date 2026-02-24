@@ -62,10 +62,18 @@ async function runWithConcurrencyLimit(
   }
 }
 
+function expandHome(p: string): string {
+  return p.startsWith('~') ? path.join(homedir(), p.slice(1)) : p;
+}
+
 export async function snapTest() {
-  const { positionals } = parseArgs({
+  const { positionals, values } = parseArgs({
     allowPositionals: true,
     args: process.argv.slice(3),
+    options: {
+      dir: { type: 'string' },
+      'bin-dir': { type: 'string' },
+    },
   });
 
   const filter = positionals[0] ?? ''; // Optional filter to run specific test cases
@@ -115,7 +123,7 @@ export async function snapTest() {
   // Clean up the temporary directory on exit
   process.on('exit', () => fs.rmSync(tempTmpDir, { recursive: true, force: true }));
 
-  const casesDir = path.resolve('snap-tests');
+  const casesDir = path.resolve(values.dir || 'snap-tests');
 
   const taskFunctions: (() => Promise<void>)[] = [];
   for (const caseName of fs.readdirSync(casesDir)) {
@@ -123,7 +131,7 @@ export async function snapTest() {
       continue;
     } // Skip hidden files like .DS_Store
     if (caseName.includes(filter)) {
-      taskFunctions.push(() => runTestCase(caseName, tempTmpDir, casesDir));
+      taskFunctions.push(() => runTestCase(caseName, tempTmpDir, casesDir, values['bin-dir']));
     }
   }
 
@@ -165,7 +173,7 @@ interface Steps {
   after?: string[];
 }
 
-async function runTestCase(name: string, tempTmpDir: string, casesDir: string) {
+async function runTestCase(name: string, tempTmpDir: string, casesDir: string, binDir?: string) {
   const steps: Steps = JSON.parse(
     await fsPromises.readFile(`${casesDir}/${name}/steps.json`, 'utf-8'),
   );
@@ -210,7 +218,9 @@ async function runTestCase(name: string, tempTmpDir: string, casesDir: string) {
   }
   env['PATH'] = [
     // Extend PATH to include the package's bin directory
-    path.resolve('bin'),
+    // --bin-dir overrides the default for cases like global CLI tests
+    // where vp should resolve to the Rust binary instead of the Node.js script
+    path.resolve(expandHome(binDir || 'bin')),
     ...env['PATH'].split(path.delimiter),
   ].join(path.delimiter);
 

@@ -18,7 +18,7 @@
   "exclude": [
     "ecosystem-ci",
     "packages/cli/snap-tests",
-    "packages/global/snap-tests",
+    "packages/cli/snap-tests-global",
     "rolldown-vite",
     "rolldown",
     "target"
