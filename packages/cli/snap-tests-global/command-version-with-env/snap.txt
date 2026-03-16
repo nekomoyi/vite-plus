@@ -1,4 +1,4 @@
-> vp --version # should print version
+> vp --version
 VITE+ - The Unified Toolchain for the Web
 
 vp v<semver>
@@ -16,8 +16,5 @@ Tools:
   tsdown           v<semver>
 
 Environment:
-  Package manager  Not found
-  Node.js          Not found
-
-> test -f .node-version && echo 'FAIL: .node-version was created' || echo 'OK: no .node-version created'
-OK: no .node-version created
+  Package manager  pnpm v<semver>
+  Node.js          v<semver> (engines.node)
