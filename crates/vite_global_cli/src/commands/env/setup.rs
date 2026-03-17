@@ -288,25 +288,19 @@ async fn generate_completion_scripts(
     let completion_dir = vite_plus_home.join("completion");
     tokio::fs::create_dir_all(&completion_dir).await?;
 
-    // Bash completion
-    let bash_completion = completion_dir.join("vp.bash");
-    let mut bash_file = std::fs::File::create(&bash_completion)?;
-    clap_complete::generate(clap_complete::Shell::Bash, &mut cmd, "vp", &mut bash_file);
+    // Generate shell completion scripts
+    let completions = [
+        (clap_complete::Shell::Bash, "vp.bash"),
+        (clap_complete::Shell::Zsh, "_vp"),
+        (clap_complete::Shell::Fish, "vp.fish"),
+        (clap_complete::Shell::PowerShell, "vp.ps1"),
+    ];
 
-    // Zsh completion (following zsh convention: _vp)
-    let zsh_completion = completion_dir.join("_vp");
-    let mut zsh_file = std::fs::File::create(&zsh_completion)?;
-    clap_complete::generate(clap_complete::Shell::Zsh, &mut cmd, "vp", &mut zsh_file);
-
-    // Fish completion
-    let fish_completion = completion_dir.join("vp.fish");
-    let mut fish_file = std::fs::File::create(&fish_completion)?;
-    clap_complete::generate(clap_complete::Shell::Fish, &mut cmd, "vp", &mut fish_file);
-
-    // PowerShell completion
-    let ps1_completion = completion_dir.join("vp.ps1");
-    let mut ps1_file = std::fs::File::create(&ps1_completion)?;
-    clap_complete::generate(clap_complete::Shell::PowerShell, &mut cmd, "vp", &mut ps1_file);
+    for (shell, filename) in completions {
+        let path = completion_dir.join(filename);
+        let mut file = std::fs::File::create(&path)?;
+        clap_complete::generate(shell, &mut cmd, "vp", &mut file);
+    }
 
     tracing::debug!("Generated completion scripts in {:?}", completion_dir);
 
@@ -430,11 +424,13 @@ async fn create_env_files(vite_plus_home: &vite_path::AbsolutePath) -> Result<()
         home_dir
             .as_ref()
             .and_then(|h| path.as_path().strip_prefix(h).ok())
-            .map(|s| format!("$HOME/{}", s.display()))
+            .map(|s| {
+                // Normalize to forward slashes for $HOME/... paths (POSIX-style)
+                format!("$HOME/{}", s.display().to_string().replace('\\', "/"))
+            })
             .unwrap_or_else(|| path.as_path().display().to_string())
     };
     let bin_path_ref = to_ref(&bin_path);
-    let completion_path_ref = to_ref(&completion_path);
 
     // POSIX env file (bash/zsh)
     // When sourced multiple times, removes existing entry and re-prepends to front
@@ -492,8 +488,8 @@ elif [ -n "$ZSH_VERSION" ] && type compdef >/dev/null 2>&1; then
 fi
 "#
     .replace("__VP_BIN__", &bin_path_ref)
-    .replace("__VP_COMPLETION_BASH__", &format!("{}/vp.bash", completion_path_ref))
-    .replace("__VP_COMPLETION_ZSH__", &format!("{}/_vp", completion_path_ref));
+    .replace("__VP_COMPLETION_BASH__", &to_ref(&completion_path.join("vp.bash")))
+    .replace("__VP_COMPLETION_ZSH__", &to_ref(&completion_path.join("_vp")));
     let env_file = vite_plus_home.join("env");
     tokio::fs::write(&env_file, env_content).await?;
 
@@ -525,7 +521,7 @@ if test -f "$__vp_completion"
 end
 "#
     .replace("__VP_BIN__", &bin_path_ref)
-    .replace("__VP_COMPLETION_FISH__", &format!("{}/vp.fish", completion_path_ref));
+    .replace("__VP_COMPLETION_FISH__", &to_ref(&completion_path.join("vp.fish")));
     let env_fish_file = vite_plus_home.join("env.fish");
     tokio::fs::write(&env_fish_file, env_fish_content).await?;
 
@@ -569,10 +565,10 @@ if (Test-Path $__vp_completion) {
 
     // For PowerShell, use the actual absolute path (not $HOME-relative)
     let bin_path_win = bin_path.as_path().display().to_string();
-    let completion_path_win = completion_path.as_path().display().to_string();
+    let completion_ps1_win = completion_path.join("vp.ps1").as_path().display().to_string();
     let env_ps1_content = env_ps1_content
         .replace("__VP_BIN_WIN__", &bin_path_win)
-        .replace("__VP_COMPLETION_PS1__", &format!("{}/vp.ps1", completion_path_win));
+        .replace("__VP_COMPLETION_PS1__", &completion_ps1_win);
     let env_ps1_file = vite_plus_home.join("env.ps1");
     tokio::fs::write(&env_ps1_file, env_ps1_content).await?;
 
@@ -952,7 +948,11 @@ mod tests {
         );
         assert!(
             ps1_content.contains("Shell completion")
-                && ps1_content.contains("/completion/vp.ps1\""),
+                && ps1_content.contains(&format!(
+                    "{}completion{}vp.ps1\"",
+                    std::path::MAIN_SEPARATOR_STR,
+                    std::path::MAIN_SEPARATOR_STR
+                )),
             "env.ps1 file should contain PowerShell completion"
         );
 
