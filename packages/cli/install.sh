@@ -325,6 +325,10 @@ add_bin_to_path() {
   ref_pattern=$(printf '%s' "$INSTALL_DIR_REF" | sed 's/[.[\*^$()+?{|]/\\&/g')
 
   if [ -f "$shell_config" ]; then
+    if [ ! -w "$shell_config" ]; then
+      warn "Cannot write to $shell_config (permission denied), skipping."
+      return 1
+    fi
     if grep -q "${abs_pattern}/env" "$shell_config" 2>/dev/null || \
        grep -q "${ref_pattern}/env" "$shell_config" 2>/dev/null; then
       return 2
