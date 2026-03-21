@@ -515,9 +515,12 @@ function vp
 end
 
 # Shell completion for fish
-set -l __vp_completion "__VP_COMPLETION_FISH__"
-if test -f "$__vp_completion"
-    source "$__vp_completion"
+if not set -q __vp_completion_sourced
+    set -l __vp_completion "__VP_COMPLETION_FISH__"
+    if test -f "$__vp_completion"
+        source "$__vp_completion"
+        set -g __vp_completion_sourced 1
+    end
 end
 "#
     .replace("__VP_BIN__", &bin_path_ref)
