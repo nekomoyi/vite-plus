@@ -17,6 +17,7 @@ mod shim;
 mod tips;
 
 use std::{
+    env,
     io::{IsTerminal, Write},
     process::{ExitCode, ExitStatus},
 };
@@ -229,11 +230,18 @@ async fn main() -> ExitCode {
     // Initialize tracing
     vite_shared::init_tracing();
 
+    let mut args: Vec<String> = std::env::args().collect();
+
+    // Replace bash completion script to fix completion for items containing ':'
+    if env::var_os("VP_COMPLETE").is_some_and(|shell| shell == "bash") && args.len() == 1 {
+        print!("{}", include_str!("../completion-register.bash"));
+        return ExitCode::SUCCESS;
+    }
+
     // Handle shell completion
     CompleteEnv::with_factory(command_with_help).var("VP_COMPLETE").complete();
 
     // Check for shim mode (invoked as node, npm, or npx)
-    let mut args: Vec<String> = std::env::args().collect();
     let argv0 = args.first().map(|s| s.as_str()).unwrap_or("vp");
     tracing::debug!("argv0: {argv0}");
 
