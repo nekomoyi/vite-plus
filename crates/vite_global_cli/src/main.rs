@@ -230,7 +230,9 @@ async fn main() -> ExitCode {
     vite_shared::init_tracing();
 
     // Handle shell completion
-    CompleteEnv::with_factory(command_with_help).complete();
+    CompleteEnv::with_factory(command_with_help)
+        .var("VP_COMPLETE")
+        .complete();
 
     // Check for shim mode (invoked as node, npm, or npx)
     let mut args: Vec<String> = std::env::args().collect();

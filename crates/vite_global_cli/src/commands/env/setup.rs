@@ -432,9 +432,9 @@ vp() {
 
 # Dynamic shell completion for bash/zsh
 if [ -n "$BASH_VERSION" ] && type complete >/dev/null 2>&1; then
-    eval "$(COMPLETE=bash command vp)"
+    eval "$(VP_COMPLETE=bash command vp)"
 elif [ -n "$ZSH_VERSION" ] && type compdef >/dev/null 2>&1; then
-    eval "$(COMPLETE=zsh command vp)"
+    eval "$(VP_COMPLETE=zsh command vp)"
 fi
 "#
     .replace("__VP_BIN__", &bin_path_ref);
@@ -463,7 +463,7 @@ function vp
 end
 
 # Dynamic shell completion for fish
-COMPLETE=fish command vp | source
+VP_COMPLETE=fish command vp | source
 "#
     .replace("__VP_BIN__", &bin_path_ref);
     let env_fish_file = vite_plus_home.join("env.fish");
@@ -854,11 +854,11 @@ mod tests {
 
         // Verify completion env is set
         assert!(
-            env_content.contains("COMPLETE=bash") && env_content.contains("COMPLETE=zsh"),
+            env_content.contains("VP_COMPLETE=bash") && env_content.contains("VP_COMPLETE=zsh"),
             "env file should contain completion for bash and zsh"
         );
         assert!(
-            fish_content.contains("COMPLETE=fish"),
+            fish_content.contains("VP_COMPLETE=fish"),
             "env.fish file should contain completion for fish"
         );
         assert!(
