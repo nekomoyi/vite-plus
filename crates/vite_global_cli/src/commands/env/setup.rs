@@ -501,9 +501,9 @@ function vp {
 }
 
 # Dynamic shell completion for PowerShell
-$env:COMPLETE = "powershell"
+$env:VP_COMPLETE = "powershell"
 & (Join-Path $__vp_bin "vp.exe") | Out-String | Invoke-Expression
-Remove-Item Env:\COMPLETE -ErrorAction SilentlyContinue
+Remove-Item Env:\VP_COMPLETE -ErrorAction SilentlyContinue
 "#;
 
     // For PowerShell, use the actual absolute path (not $HOME-relative)
