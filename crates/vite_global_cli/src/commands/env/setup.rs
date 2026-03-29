@@ -862,7 +862,7 @@ mod tests {
             "env.fish file should contain completion for fish"
         );
         assert!(
-            ps1_content.contains("COMPLETE"),
+            ps1_content.contains("VP_COMPLETE = \"powershell\""),
             "env.ps1 file should contain completion for PowerShell"
         );
     }
