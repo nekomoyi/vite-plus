@@ -20,7 +20,6 @@ use crate::{
     },
     error::Error,
     help,
-    js_executor::JsExecutor,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -1491,7 +1490,7 @@ fn run_tasks_completions(current: &OsStr) -> Vec<clap_complete::CompletionCandid
     let Some(cwd) = std::env::current_dir()
         .ok()
         .and_then(AbsolutePathBuf::new)
-        .filter(|p| JsExecutor::resolve_local_vite_plus(p).is_some())
+        .filter(|p| commands::has_vite_plus_dependency(p))
     else {
         return vec![];
     };
