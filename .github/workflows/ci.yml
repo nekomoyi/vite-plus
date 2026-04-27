@@ -273,6 +273,7 @@ jobs:
         run: |
           $vpHome = Join-Path $HOME ".vite-plus"
           $vpBin = Join-Path $vpHome "bin"
+          . (Join-Path $vpHome 'env.ps1')
 
           Write-Host "PATH: $env:Path"
           Get-Command node
@@ -449,6 +450,7 @@ jobs:
         shell: pwsh
         run: |
           $vpHome = Join-Path $HOME ".vite-plus"
+          . (Join-Path $vpHome 'env.ps1')
           Get-ChildItem $vpHome
 
           # Helper to read the installed CLI version from package.json
@@ -557,6 +559,7 @@ jobs:
         shell: pwsh
         run: |
           $vpHome = Join-Path $HOME ".vite-plus"
+          . (Join-Path $vpHome 'env.ps1')
 
           if ($IsWindows) {
             # Retry — Windows file locks can cause transient "Access is denied" errors
