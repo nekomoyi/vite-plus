@@ -269,6 +269,7 @@ jobs:
           RUST_MIN_STACK: 8388608
 
       - name: Test global package install (powershell)
+        if: ${{ matrix.os != 'namespace-profile-linux-x64-default' }}
         shell: pwsh
         run: |
           $vpHome = Join-Path $HOME ".vite-plus"
@@ -447,6 +448,7 @@ jobs:
           fi
 
       - name: Test upgrade (powershell)
+        if: ${{ matrix.os != 'namespace-profile-linux-x64-default' }}
         shell: pwsh
         run: |
           $vpHome = Join-Path $HOME ".vite-plus"
@@ -556,6 +558,7 @@ jobs:
           vp --version
 
       - name: Test implode (powershell)
+        if: ${{ matrix.os != 'namespace-profile-linux-x64-default' }}
         shell: pwsh
         run: |
           $vpHome = Join-Path $HOME ".vite-plus"
