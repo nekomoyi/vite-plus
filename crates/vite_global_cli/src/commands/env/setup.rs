@@ -501,7 +501,12 @@ unset __vp_bin
 vp() {
     if [ "$1" = "env" ] && [ "$2" = "use" ]; then
         case " $* " in *" -h "*|*" --help "*) command vp "$@"; return; esac
-        __vp_out="$(VP_ENV_USE_EVAL_ENABLE=1 command vp "$@")" || return $?
+        __vp_shell=bash
+        if [ -n "$ZSH_VERSION" ]; then
+            __vp_shell=zsh
+        fi
+        __vp_out="$(VP_ENV_USE_EVAL_ENABLE=1 VP_SHELL=$__vp_shell command vp "$@")" || return $?
+        unset __vp_shell
         eval "$__vp_out"
     else
         command vp "$@"
@@ -542,7 +547,8 @@ function vp
             command vp $argv; return
         end
         set -lx VP_ENV_USE_EVAL_ENABLE 1
-        set -l __vp_out (env FISH_VERSION=$FISH_VERSION command vp $argv); or return $status
+        set -lx VP_SHELL fish
+        set -l __vp_out (command vp $argv); or return $status
         eval (string join ';' $__vp_out)
     else
         command vp $argv
@@ -577,7 +583,7 @@ def --env --wrapped vp [...args: string@"nu-complete vp"] {
             ^vp ...$args
             return
         }
-        let out = (with-env { VP_ENV_USE_EVAL_ENABLE: "1", VP_SHELL_NU: "1" } {
+        let out = (with-env { VP_ENV_USE_EVAL_ENABLE: "1", VP_SHELL: "nu" } {
             ^vp ...$args
         })
         let lines = ($out | lines)
@@ -644,7 +650,7 @@ function vp {
             & (Join-Path $__vp_bin "vp") @args; return
         }
         $env:VP_ENV_USE_EVAL_ENABLE = "1"
-        $env:VP_SHELL_PWSH = "1"
+        $env:VP_SHELL = "pwsh"
         $output = & (Join-Path $__vp_bin "vp") @args 2>&1 | ForEach-Object {
             if ($_ -is [System.Management.Automation.ErrorRecord]) {
                 Write-Host $_.Exception.Message
@@ -653,7 +659,7 @@ function vp {
             }
         }
         Remove-Item Env:VP_ENV_USE_EVAL_ENABLE -ErrorAction SilentlyContinue
-        Remove-Item Env:VP_SHELL_PWSH -ErrorAction SilentlyContinue
+        Remove-Item Env:VP_SHELL -ErrorAction SilentlyContinue
         if ($LASTEXITCODE -eq 0 -and $output) {
             Invoke-Expression ($output -join "`n")
         }
@@ -697,7 +703,7 @@ Register-ArgumentCompleter -Native -CommandName vpr -ScriptBlock $__vpr_comp
 
     // cmd.exe wrapper for `vp env use` (cmd.exe cannot define shell functions)
     // Users run `vp-use 24` in cmd.exe instead of `vp env use 24`
-    let vp_use_cmd_content = "@echo off\r\nset VP_ENV_USE_EVAL_ENABLE=1\r\nfor /f \"delims=\" %%i in ('%~dp0..\\current\\bin\\vp.exe env use %*') do %%i\r\nset VP_ENV_USE_EVAL_ENABLE=\r\n";
+    let vp_use_cmd_content = "@echo off\r\nset VP_ENV_USE_EVAL_ENABLE=1\r\nset VP_SHELL=cmd\r\nfor /f \"delims=\" %%i in ('%~dp0..\\current\\bin\\vp.exe env use %*') do %%i\r\nset VP_SHELL=\r\nset VP_ENV_USE_EVAL_ENABLE=\r\n";
     // Only write if bin directory exists (it may not during --env-only)
     if tokio::fs::try_exists(&bin_path).await.unwrap_or(false) {
         let vp_use_cmd_file = bin_path.join("vp-use.cmd");
@@ -825,10 +831,7 @@ mod tests {
             nu_content.contains("VP_COMPLETE=fish"),
             "env.nu should use dynamic Fish completion delegation"
         );
-        assert!(
-            nu_content.contains("VP_SHELL_NU"),
-            "env.nu should use VP_SHELL_NU explicit marker instead of inherited NU_VERSION"
-        );
+        assert!(nu_content.contains("VP_SHELL: \"nu\""), "env.nu should set VP_SHELL=nu");
         assert!(nu_content.contains("load-env"), "env.nu should use load-env to apply exports");
     }
 
@@ -992,6 +995,15 @@ mod tests {
             env_content.contains("command vp \"$@\""),
             "env file should use 'command vp' for passthrough"
         );
+        assert!(
+            env_content.contains("__vp_shell=bash"),
+            "env file should default VP_SHELL to bash"
+        );
+        assert!(env_content.contains("__vp_shell=zsh"), "env file should detect zsh explicitly");
+        assert!(
+            env_content.contains("VP_SHELL=$__vp_shell"),
+            "env file should pass the concrete shell name via VP_SHELL"
+        );
     }
 
     #[tokio::test]
@@ -1018,6 +1030,10 @@ mod tests {
             fish_content.contains("command vp $argv"),
             "env.fish should use 'command vp' for passthrough"
         );
+        assert!(
+            fish_content.contains("set -lx VP_SHELL fish"),
+            "env.fish should set VP_SHELL=fish for shell detection"
+        );
     }
 
     #[tokio::test]
@@ -1025,6 +1041,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let home = AbsolutePathBuf::new(temp_dir.path().to_path_buf()).unwrap();
         let _guard = home_guard(temp_dir.path());
+        tokio::fs::create_dir_all(home.join("bin")).await.unwrap();
 
         create_env_files(&home).await.unwrap();
 
@@ -1033,11 +1050,19 @@ mod tests {
         // Verify PowerShell function is present
         assert!(ps1_content.contains("function vp {"), "env.ps1 should contain vp function");
         assert!(ps1_content.contains("Invoke-Expression"), "env.ps1 should use Invoke-Expression");
+        assert!(
+            ps1_content.contains("$env:VP_SHELL = \"pwsh\""),
+            "env.ps1 should set VP_SHELL=pwsh"
+        );
         // Should not contain placeholders
         assert!(
             !ps1_content.contains("__VP_BIN_WIN__"),
             "env.ps1 should not contain __VP_BIN_WIN__ placeholder"
         );
+
+        let cmd_content =
+            tokio::fs::read_to_string(home.join("bin").join("vp-use.cmd")).await.unwrap();
+        assert!(cmd_content.contains("set VP_SHELL=cmd"), "vp-use.cmd should set VP_SHELL=cmd");
     }
 
     #[tokio::test]
