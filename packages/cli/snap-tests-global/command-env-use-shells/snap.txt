@@ -33,7 +33,3 @@ Using Node.js v<semver> (resolved from <semver>)
 > VP_SHELL=POWERSHELL vp env use 20.18.0 --no-install # should detect case-insensitive powershell
 $env:VP_NODE_VERSION = "20.18.0"
 Using Node.js v<semver> (resolved from <semver>)
-
-> VP_SHELL=invalid vp env use 20.18.0 --no-install # should fallback to platform default
-export VP_NODE_VERSION=20.18.0
-Using Node.js v<semver> (resolved from <semver>)

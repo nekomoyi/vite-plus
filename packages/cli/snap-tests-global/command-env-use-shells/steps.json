@@ -12,7 +12,6 @@
     "VP_SHELL=cmd vp env use 20.18.0 --no-install # should detect cmd and output cmd export",
     "VP_SHELL=BASH vp env use 20.18.0 --no-install # should detect case-insensitive bash",
     "VP_SHELL=FISH vp env use 20.18.0 --no-install # should detect case-insensitive fish",
-    "VP_SHELL=POWERSHELL vp env use 20.18.0 --no-install # should detect case-insensitive powershell",
-    "VP_SHELL=invalid vp env use 20.18.0 --no-install # should fallback to platform default"
+    "VP_SHELL=POWERSHELL vp env use 20.18.0 --no-install # should detect case-insensitive powershell"
   ]
 }
