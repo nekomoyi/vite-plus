@@ -562,7 +562,7 @@ def --env --wrapped vp [...args: string@"nu-complete vp"] {
             ^vp ...$args
             return
         }
-        let out = (with-env { VP_ENV_USE_EVAL_ENABLE: "1", VP_SHELL_NU: "1" } {
+        let out = (with-env { VP_ENV_USE_EVAL_ENABLE: "1" } {
             ^vp ...$args
         })
         let lines = ($out | lines)
@@ -625,7 +625,6 @@ function vp {
             & (Join-Path $__vp_bin "vp") @args; return
         }
         $env:VP_ENV_USE_EVAL_ENABLE = "1"
-        $env:VP_SHELL_PWSH = "1"
         $output = & (Join-Path $__vp_bin "vp") @args 2>&1 | ForEach-Object {
             if ($_ -is [System.Management.Automation.ErrorRecord]) {
                 Write-Host $_.Exception.Message
@@ -634,7 +633,6 @@ function vp {
             }
         }
         Remove-Item Env:VP_ENV_USE_EVAL_ENABLE -ErrorAction SilentlyContinue
-        Remove-Item Env:VP_SHELL_PWSH -ErrorAction SilentlyContinue
         if ($LASTEXITCODE -eq 0 -and $output) {
             Invoke-Expression ($output -join "`n")
         }
@@ -847,10 +845,6 @@ mod tests {
         assert!(
             nu_content.contains("VP_COMPLETE=fish"),
             "env.nu should use dynamic Fish completion delegation"
-        );
-        assert!(
-            nu_content.contains("VP_SHELL_NU"),
-            "env.nu should use VP_SHELL_NU explicit marker instead of inherited NU_VERSION"
         );
         assert!(nu_content.contains("load-env"), "env.nu should use load-env to apply exports");
     }

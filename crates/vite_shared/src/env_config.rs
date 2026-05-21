@@ -128,18 +128,10 @@ pub struct EnvConfig {
     /// Env: `NU_VERSION`
     pub nu_version: Option<String>,
 
-    /// Explicit Nu shell eval signal set by the `env.nu` wrapper.
+    /// Explicitly specify the current shell.
     ///
-    /// Unlike `NU_VERSION`, this is not inherited by child processes — it is only
-    /// present when the Nushell wrapper explicitly passes it via `with-env`.
-    ///
-    /// Env: `VP_SHELL_NU`
-    pub vp_shell_nu: bool,
-
-    /// Explicit `PowerShell` eval signal set by the `env.ps1` wrapper.
-    ///
-    /// Env: `VP_SHELL_PWSH`
-    pub vp_shell_pwsh: bool,
+    /// Env: `VP_SHELL`
+    pub vp_shell: Option<String>,
 }
 
 impl EnvConfig {
@@ -170,8 +162,7 @@ impl EnvConfig {
             fish_version: std::env::var("FISH_VERSION").ok(),
             ps_module_path: std::env::var("PSModulePath").ok(),
             nu_version: std::env::var("NU_VERSION").ok(),
-            vp_shell_nu: std::env::var(env_vars::VP_SHELL_NU).is_ok(),
-            vp_shell_pwsh: std::env::var(env_vars::VP_SHELL_PWSH).is_ok(),
+            vp_shell: std::env::var(env_vars::VP_SHELL).ok(),
         }
     }
 
@@ -257,8 +248,7 @@ impl EnvConfig {
             fish_version: None,
             ps_module_path: None,
             nu_version: None,
-            vp_shell_nu: false,
-            vp_shell_pwsh: false,
+            vp_shell: None,
         }
     }
 

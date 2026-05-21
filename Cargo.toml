@@ -266,6 +266,7 @@ simdutf8 = "0.1.5"
 string_cache = "0.9.0"
 sugar_path = { version = "2.0.1", features = ["cached_current_dir"] }
 syn = { version = "2", default-features = false }
+sysinfo = "0.39.2"
 tar = "0.4.43"
 tempfile = "3.14.0"
 terminal_size = "0.4.2"
