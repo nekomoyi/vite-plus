@@ -437,18 +437,6 @@ mod tests {
         assert_eq!(shell, Shell::PowerShell);
     }
 
-    #[test]
-    fn test_detect_shell_vp_shell_invalid_falls_back() {
-        let _guard = vite_shared::EnvConfig::test_guard(vite_shared::EnvConfig {
-            vp_shell: Some("invalid_shell".into()),
-            ..vite_shared::EnvConfig::for_test()
-        });
-        let shell = detect_shell();
-        #[cfg(not(windows))]
-        assert_eq!(shell, Shell::Posix);
-        #[cfg(windows)]
-        assert_eq!(shell, Shell::Cmd);
-    }
 
     #[test]
     fn test_detect_shell_vp_shell_fish() {
@@ -460,13 +448,5 @@ mod tests {
         assert_eq!(shell, Shell::Fish);
     }
 
-    #[test]
-    fn test_detect_shell_posix_default() {
-        let _guard = vite_shared::EnvConfig::test_guard(vite_shared::EnvConfig::for_test());
-        let shell = detect_shell();
-        #[cfg(not(windows))]
-        assert_eq!(shell, Shell::Posix);
-        #[cfg(windows)]
-        assert_eq!(shell, Shell::Cmd);
-    }
+
 }

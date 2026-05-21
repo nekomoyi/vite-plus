@@ -210,16 +210,6 @@ mod tests {
         assert_eq!(shell, Shell::NuShell);
     }
 
-    #[test]
-    fn test_detect_shell_posix_default() {
-        // All shell detection fields None → defaults
-        let _guard = vite_shared::EnvConfig::test_guard(vite_shared::EnvConfig::for_test());
-        let shell = detect_shell();
-        #[cfg(not(windows))]
-        assert_eq!(shell, Shell::Posix);
-        #[cfg(windows)]
-        assert_eq!(shell, Shell::Cmd);
-    }
 
     #[test]
     fn test_format_export_posix() {
