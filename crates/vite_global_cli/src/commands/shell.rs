@@ -116,6 +116,14 @@ fn get_process_info(pid: u32) -> Option<ProcessInfo> {
         .output()
         .ok()?;
 
+    if !output.status.success() {
+        tracing::debug!(
+            "ps failed while reading process info for pid {pid}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return None;
+    }
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut lines = stdout.lines();
 
