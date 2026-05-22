@@ -211,6 +211,16 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_shell_posix_default() {
+        let _guard = vite_shared::EnvConfig::test_guard(vite_shared::EnvConfig::for_test());
+        let shell = detect_shell();
+        #[cfg(not(windows))]
+        assert_eq!(shell, Shell::Posix);
+        #[cfg(windows)]
+        assert_eq!(shell, Shell::Cmd);
+    }
+
+    #[test]
     fn test_format_export_posix() {
         let result = format_export(&Shell::Posix, "20.18.0");
         assert_eq!(result, "export VP_NODE_VERSION=20.18.0");

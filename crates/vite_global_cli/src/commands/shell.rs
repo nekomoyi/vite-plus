@@ -6,9 +6,6 @@ use directories::BaseDirs;
 use vite_path::{AbsolutePath, AbsolutePathBuf};
 use vite_str::Str;
 
-/// Maximum depth to walk up the process tree for shell inference.
-const MAX_PROCESS_DEPTH: u8 = 10;
-
 /// Detected shell type for output formatting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Shell {
@@ -41,8 +38,7 @@ impl FromStr for Shell {
 
 /// Detect the current shell:
 /// 1. `VP_SHELL` environment variable
-/// 2. Process tree inference
-/// 3. Platform default
+/// 2. Platform default
 #[must_use]
 pub fn detect_shell() -> Shell {
     let config = vite_shared::EnvConfig::get();
@@ -54,139 +50,8 @@ pub fn detect_shell() -> Shell {
         }
     }
 
-    // 2. Infer from process tree
-    if let Some(shell) = infer_shell_from_process_tree() {
-        return shell;
-    }
-
-    // 3. Platform default
+    // 2. Platform default
     if cfg!(windows) { Shell::Cmd } else { Shell::Posix }
-}
-
-/// Infer shell by walking up the process tree.
-/// Returns the first known shell.
-fn infer_shell_from_process_tree() -> Option<Shell> {
-    #[cfg(unix)]
-    {
-        infer_shell_unix()
-    }
-    #[cfg(windows)]
-    {
-        infer_shell_windows()
-    }
-}
-
-#[cfg(unix)]
-fn infer_shell_unix() -> Option<Shell> {
-    let mut pid = Some(std::process::id());
-    let mut visited = 0u8;
-
-    while let Some(current_pid) = pid {
-        if visited >= MAX_PROCESS_DEPTH {
-            return None;
-        }
-
-        let info = get_process_info(current_pid)?;
-        let binary = info.command.trim_start_matches('-').split('/').next_back()?;
-
-        if let Ok(shell) = Shell::from_str(binary) {
-            return Some(shell);
-        }
-
-        tracing::debug!("binary is not a supported shell: {:?}", binary);
-
-        pid = info.parent_pid;
-        visited += 1;
-    }
-
-    None
-}
-
-#[cfg(unix)]
-struct ProcessInfo {
-    parent_pid: Option<u32>,
-    command: String,
-}
-
-/// Get process name and parent PID
-#[cfg(unix)]
-fn get_process_info(pid: u32) -> Option<ProcessInfo> {
-    let output = std::process::Command::new("ps")
-        .args(["-o", "ppid,comm", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        tracing::debug!(
-            "ps failed while reading process info for pid {pid}: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut lines = stdout.lines();
-
-    // Skip header line
-    lines.next()?;
-
-    let line = lines.next()?;
-    let mut parts = line.split_whitespace();
-
-    let ppid = parts.next()?.parse().ok();
-    let command = parts.next()?.to_string();
-
-    Some(ProcessInfo { parent_pid: ppid, command })
-}
-
-/// Get process name and parent PID on Windows using sysinfo.
-#[cfg(windows)]
-fn infer_shell_windows() -> Option<Shell> {
-    use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
-
-    let mut system = System::new();
-    let mut current_pid = Some(sysinfo::get_current_pid().ok()?);
-
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::All,
-        true,
-        ProcessRefreshKind::nothing().with_exe(UpdateKind::OnlyIfNotSet),
-    );
-
-    let mut visited = 0u8;
-
-    while let Some(pid) = current_pid {
-        if visited >= MAX_PROCESS_DEPTH {
-            return None;
-        }
-
-        if let Some(process) = system.process(pid) {
-            current_pid = process.parent();
-
-            let process_name = process
-                .exe()
-                .and_then(|x| x.file_stem())
-                .and_then(|x| x.to_str())
-                .map(str::to_lowercase);
-
-            if let Some(shell) = process_name
-                .as_ref()
-                .map(|x| x.as_str())
-                .and_then(|name| Shell::from_str(name).ok())
-            {
-                return Some(shell);
-            }
-
-            tracing::debug!("binary is not a supported shell: {:?}", process_name);
-        } else {
-            tracing::debug!("process not found for pid {pid}");
-            current_pid = None;
-        }
-
-        visited += 1;
-    }
-
-    None
 }
 
 /// All shell profile files that interactive terminal sessions may source.
@@ -453,5 +318,33 @@ mod tests {
         });
         let shell = detect_shell();
         assert_eq!(shell, Shell::Fish);
+    }
+
+    #[test]
+    fn test_detect_shell_defaults_without_vp_shell() {
+        let _guard = vite_shared::EnvConfig::test_guard(vite_shared::EnvConfig {
+            vp_shell: None,
+            ..vite_shared::EnvConfig::for_test()
+        });
+        let shell = detect_shell();
+        if cfg!(windows) {
+            assert_eq!(shell, Shell::Cmd);
+        } else {
+            assert_eq!(shell, Shell::Posix);
+        }
+    }
+
+    #[test]
+    fn test_detect_shell_invalid_vp_shell_falls_back_to_default() {
+        let _guard = vite_shared::EnvConfig::test_guard(vite_shared::EnvConfig {
+            vp_shell: Some("invalid".into()),
+            ..vite_shared::EnvConfig::for_test()
+        });
+        let shell = detect_shell();
+        if cfg!(windows) {
+            assert_eq!(shell, Shell::Cmd);
+        } else {
+            assert_eq!(shell, Shell::Posix);
+        }
     }
 }
