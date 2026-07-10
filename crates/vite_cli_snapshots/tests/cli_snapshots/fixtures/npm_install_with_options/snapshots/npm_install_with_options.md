@@ -1,4 +1,10 @@
-> vp install --help # print help message
+# npm_install_with_options
+
+## `vp install --help`
+
+print help message
+
+```
 Install all dependencies, or add packages if package names are provided
 
 Usage: vp install [OPTIONS] [PACKAGES]... [-- <PASS_THROUGH_ARGS>...]
@@ -33,20 +39,34 @@ Options:
       --node <NODE>                Node.js version to use for global installation (only with -g)
       --concurrency <CONCURRENCY>  Number of global package installs to run in parallel (only with -g)
   -h, --help                       Print help
+```
 
-> vp run install # https://docs.npmjs.com/cli/v10/commands/npm-install
+## `vp run install`
+
+https://docs.npmjs.com/cli/v10/commands/npm-install
+
+```
 $ vp install --prod --silent ⊘ cache disabled
+```
 
+## `vpt list-dir node_modules`
 
-> ls node_modules
+```
 @oxlint
 tslib
+```
 
-> vp run install # install again hit cache
+## `vp run install`
+
+install again hit cache
+
+```
 $ vp install --prod --silent ⊘ cache disabled
+```
 
+## `vp run --last-details`
 
-> vp run --last-details
+```
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Vite+ Task Runner • Execution Summary
@@ -60,3 +80,4 @@ Task Details:
   [1] npm-install-with-options#install: $ vp install --prod --silent ✓
       → Cache disabled in task configuration
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
