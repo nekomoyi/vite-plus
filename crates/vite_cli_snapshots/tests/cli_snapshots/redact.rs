@@ -132,6 +132,11 @@ static BARE_VERSION_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 // lines so `npm run` output is stable regardless of the check's timing.
 static NPM_NOTICE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?m)^npm notice.*\n?").unwrap());
+// Vitest prints the run's wall-clock start time ("Start at  HH:MM:SS"), which
+// is nondeterministic; mask it (the adjacent Duration line is already masked to
+// <duration>).
+static START_AT_TIME_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(Start at\s+)\d{1,2}:\d{2}:\d{2}").unwrap());
 
 #[expect(
     clippy::disallowed_types,
@@ -290,6 +295,9 @@ pub fn redact_output(
     // bare-version-block mask is NOT applied here: it is scoped to version-probe
     // steps via `redact_version_probe_output`.
     output = NPM_NOTICE_RE.replace_all(&output, "").into_owned();
+
+    // Mask vitest's nondeterministic wall-clock "Start at" time
+    output = START_AT_TIME_RE.replace_all(&output, "${1}<time>").into_owned();
 
     // Remove ^C echo that Unix terminal drivers emit when ETX (0x03) is written
     // to the PTY. Windows ConPTY does not echo it.
