@@ -295,8 +295,7 @@ impl JsExecutor {
         let mut cmd = Self::create_js_command(&node_binary, &bin_prefix);
         cmd.arg(entry_point.as_path()).args(args).current_dir(project_path.as_path());
 
-        let status = cmd.status().await?;
-        Ok(status)
+        Ok(vite_command::execute_with_terminal_guard(cmd).await?)
     }
 
     /// Delegate to local or global vite-plus CLI using the CLI's own runtime.
@@ -352,9 +351,8 @@ impl JsExecutor {
         bin_prefix: &AbsolutePath,
         args: &[String],
     ) -> Result<ExitStatus, Error> {
-        let mut cmd = self.prepare_js_entry(project_path, node_binary, bin_prefix, args)?;
-        let status = cmd.status().await?;
-        Ok(status)
+        let cmd = self.prepare_js_entry(project_path, node_binary, bin_prefix, args)?;
+        Ok(vite_command::execute_with_terminal_guard(cmd).await?)
     }
 
     /// Like [`run_js_entry`], but returns `Output`.
@@ -637,8 +635,7 @@ mod tests {
             EnvConfig::test_guard(EnvConfig::for_test_with_home(vp_home.path().to_path_buf()));
 
         // Pin Node 20.0.0 via `.node-version`: well below the declared floor and
-        // exactly the case the removed gate rejected (see the deleted
-        // `runtime-with-incompatible-project-node` snap test).
+        // exactly the case the removed gate rejected.
         let project = TempDir::new().unwrap();
         tokio::fs::write(project.path().join(".node-version"), "20.0.0\n").await.unwrap();
         let project_path = AbsolutePathBuf::new(project.path().to_path_buf()).unwrap();
