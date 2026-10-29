@@ -54,7 +54,7 @@ pub struct Args {
     pub version: bool,
 
     /// Run as if vp was started in <DIR> instead of the current working directory
-    #[arg(short = 'C', value_name = "DIR")]
+    #[arg(short = 'C', value_name = "DIR", value_hint = clap::ValueHint::DirPath)]
     pub chdir: Option<String>,
 
     #[clap(subcommand)]
@@ -1288,6 +1288,57 @@ pub fn command_with_help() -> clap::Command {
     command_with_help_with_options(RenderOptions::default())
 }
 
+/// Build a clap Command for shell completion, including top-level commands that
+/// are rewritten by `normalize_args` (`list`/`ls`, `rebuild`, `node`, `help`).
+pub fn command_for_completion() -> clap::Command {
+    let base_cmd = command_with_help();
+    let pm_subcommand = base_cmd.find_subcommand("pm").expect("pm subcommand exists");
+    let list_subcommand =
+        pm_subcommand.find_subcommand("list").expect("pm list subcommand exists").clone();
+    let rebuild_subcommand = <vp_pm_cli::RebuildArgs as clap::Args>::augment_args(
+        clap::Command::new("rebuild").about(help::TOP_LEVEL_REBUILD_ABOUT),
+    );
+    let node_subcommand =
+        clap::Command::new("node").about(help::TOP_LEVEL_NODE_ABOUT).disable_help_flag(true).arg(
+            clap::Arg::new("args")
+                .num_args(0..)
+                .trailing_var_arg(true)
+                .allow_hyphen_values(true)
+                .value_hint(clap::ValueHint::AnyPath),
+        );
+
+    let cmd = base_cmd
+        .subcommand(list_subcommand)
+        .subcommand(rebuild_subcommand)
+        .subcommand(node_subcommand);
+
+    let mut help_subcommand = clap::Command::new("help")
+        .about("Print this message or the help of the given subcommand(s)")
+        .disable_help_flag(true)
+        .disable_version_flag(true)
+        .disable_help_subcommand(true);
+    for sub in cmd.get_subcommands() {
+        help_subcommand = help_subcommand.subcommand(copy_subtree_for_help(sub.clone()));
+    }
+    help_subcommand = help_subcommand.subcommand(
+        clap::Command::new("help")
+            .about("Print this message or the help of the given subcommand(s)")
+            .disable_help_flag(true)
+            .disable_version_flag(true)
+            .disable_help_subcommand(true),
+    );
+
+    cmd.subcommand(help_subcommand)
+}
+
+fn copy_subtree_for_help(cmd: clap::Command) -> clap::Command {
+    cmd.disable_help_flag(true)
+        .disable_version_flag(true)
+        .disable_help_subcommand(true)
+        .mut_args(|arg| clap::Arg::new(arg.get_id().clone()).hide(true))
+        .mut_subcommands(copy_subtree_for_help)
+}
+
 /// Build a clap Command with custom help formatting and rendering options.
 pub fn command_with_help_with_options(render_options: RenderOptions) -> clap::Command {
     apply_custom_help(Args::command(), render_options)
@@ -1514,5 +1565,237 @@ mod tests {
             .find_map(|(name, value)| (name == "npm_config_user_agent").then_some(value))
             .unwrap();
         assert!(user_agent.to_string_lossy().starts_with("vp/0.0.0 npm/10.9.2 "), "{user_agent:?}");
+    }
+
+    fn complete_values(
+        args: &[&str],
+        index: usize,
+        current_dir: Option<&std::path::Path>,
+    ) -> Vec<String> {
+        let mut cmd = super::command_for_completion();
+        let os_args = args.iter().map(std::ffi::OsString::from).collect();
+        clap_complete::engine::complete(&mut cmd, os_args, index, current_dir)
+            .expect("completion should succeed")
+            .into_iter()
+            .map(|c| c.get_value().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn top_level_completion_includes_rewritten_commands() {
+        let values = complete_values(&["vp", ""], 1, None);
+        for expected in ["list", "rebuild", "node", "help"] {
+            assert!(
+                values.iter().any(|v| v == expected),
+                "expected top-level completion `{expected}`, got {values:?}"
+            );
+        }
+
+        let ls_values = complete_values(&["vp", "ls"], 1, None);
+        assert!(
+            ls_values.iter().any(|v| v == "ls"),
+            "expected alias completion `ls`, got {ls_values:?}"
+        );
+    }
+
+    #[test]
+    fn list_and_ls_complete_pm_list_flags() {
+        for subcmd in ["list", "ls"] {
+            let values = complete_values(&["vp", subcmd, "--"], 2, None);
+            for flag in ["--depth", "--json", "--global", "--parseable"] {
+                assert!(
+                    values.iter().any(|v| v == flag),
+                    "expected `{flag}` in `vp {subcmd} --` completions, got {values:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn node_subcommand_completes_file_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("server.js"), "console.log(1)").unwrap();
+
+        let values = complete_values(&["vp", "node", ""], 2, Some(dir.path()));
+        assert!(
+            values.iter().any(|v| v == "server.js"),
+            "expected `server.js` in `vp node ` completions, got {values:?}"
+        );
+    }
+
+    #[test]
+    fn help_subcommand_completes_top_level_and_nested_subcommands() {
+        let top_values = complete_values(&["vp", "help", ""], 2, None);
+        for expected in ["list", "rebuild", "node", "env"] {
+            assert!(
+                top_values.iter().any(|v| v == expected),
+                "expected `{expected}` in `vp help ` completions, got {top_values:?}"
+            );
+        }
+
+        let install_values = complete_values(&["vp", "help", "in"], 2, None);
+        assert!(
+            install_values.iter().any(|v| v == "install"),
+            "expected `install` in `vp help in` completions, got {install_values:?}"
+        );
+
+        // Top-level and nested aliases should be preserved in the help subtree
+        let ls_values = complete_values(&["vp", "help", "ls"], 2, None);
+        assert!(
+            ls_values.iter().any(|v| v == "ls"),
+            "expected `ls` in `vp help ls` completions, got {ls_values:?}"
+        );
+        let format_values = complete_values(&["vp", "help", "form"], 2, None);
+        assert!(
+            format_values.iter().any(|v| v == "format"),
+            "expected `format` in `vp help form` completions, got {format_values:?}"
+        );
+        let env_ls_values = complete_values(&["vp", "help", "env", "ls"], 3, None);
+        assert!(
+            env_ls_values.iter().any(|v| v == "ls"),
+            "expected `ls` in `vp help env ls` completions, got {env_ls_values:?}"
+        );
+        let pm_c_values = complete_values(&["vp", "help", "pm", "c", ""], 4, None);
+        for expected in ["list", "get", "set", "delete"] {
+            assert!(
+                pm_c_values.iter().any(|v| v == expected),
+                "expected `{expected}` in `vp help pm c ` completions, got {pm_c_values:?}"
+            );
+        }
+
+        let env_values = complete_values(&["vp", "help", "env", ""], 3, None);
+        for expected in ["use", "pin", "setup"] {
+            assert!(
+                env_values.iter().any(|v| v == expected),
+                "expected `{expected}` in `vp help env ` completions, got {env_values:?}"
+            );
+        }
+
+        // Nested subcommands do not support a `help` subcommand at runtime
+        for nested in ["env", "pm"] {
+            let nested_values = complete_values(&["vp", nested, "he"], 2, None);
+            assert!(
+                !nested_values.iter().any(|v| v == "help"),
+                "did not expect `help` in `vp {nested} he` completions, got {nested_values:?}"
+            );
+        }
+
+        // Leaf commands inside `help` should not complete positional values or flags
+        let help_node_values = complete_values(&["vp", "help", "node", "--"], 3, None);
+        assert!(
+            help_node_values.is_empty(),
+            "expected no flag completions for `vp help node --`, got {help_node_values:?}"
+        );
+    }
+
+    #[test]
+    fn completion_command_matches_top_level_help_and_normalized_aliases() {
+        let cmd = super::command_for_completion();
+        let doc = crate::help::top_level_help_doc();
+
+        for section in &doc.sections {
+            let vp_cli_help::HelpSection::Rows { rows, .. } = section else {
+                continue;
+            };
+            for row in rows {
+                let mut names = row.label.split(',').map(str::trim);
+                let primary = names.next().expect("help row has primary command name");
+                let sub = cmd.find_subcommand(primary).unwrap_or_else(|| {
+                    panic!("help command `{primary}` is missing from command_for_completion()")
+                });
+                assert_eq!(
+                    sub.get_name(),
+                    primary,
+                    "expected `{primary}` to be the primary subcommand name"
+                );
+                let expected_aliases: Vec<&str> = names.collect();
+                let visible_aliases: Vec<&str> = sub.get_visible_aliases().collect();
+                assert_eq!(
+                    visible_aliases, expected_aliases,
+                    "help aliases for `{primary}` do not match command_for_completion() visible aliases"
+                );
+            }
+        }
+
+        // Verify parity with top-level commands rewritten by `normalize_args`
+        for rewritten in ["list", "ls", "rebuild", "node", "help"] {
+            assert!(
+                cmd.find_subcommand(rewritten).is_some(),
+                "normalized top-level command `{rewritten}` is missing from command_for_completion()"
+            );
+        }
+    }
+
+    #[test]
+    fn chdir_flag_completes_only_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("apps")).unwrap();
+        std::fs::write(dir.path().join("README.md"), "hello").unwrap();
+
+        let values = complete_values(&["vp", "-C", ""], 2, Some(dir.path()));
+        assert!(
+            values.iter().any(|v| v == "apps/" || v == "apps\\"),
+            "expected directory candidate for -C, got {values:?}"
+        );
+        assert!(
+            !values.iter().any(|v| v.contains("README.md")),
+            "did not expect file candidate for -C, got {values:?}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn node_subcommand_completes_paths_from_chdir_target_via_complete_env() {
+        use clap_complete::env::EnvCompleter as _;
+
+        let original_cwd = std::env::current_dir().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("root-only.js"), "console.log(0)").unwrap();
+        let target = dir.path().join("apps").join("server");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("server.js"), "console.log(1)").unwrap();
+
+        // 1. Verify full CompleteEnv::try_complete("--") switches process cwd to target
+        // SAFETY: serialized via `#[serial_test::serial]`.
+        unsafe {
+            std::env::set_var("VP_COMPLETE", "fish");
+        }
+        let completed = crate::completion::try_complete(
+            super::command_for_completion,
+            ["vp", "--", "vp", "-C", "apps/server", "node", ""],
+            Some(dir.path()),
+        )
+        .unwrap();
+        let after_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&original_cwd).unwrap();
+        assert!(completed);
+        assert_eq!(after_cwd.canonicalize().unwrap(), target.canonicalize().unwrap());
+
+        // 2. Verify VpShellCompleter::write_complete outputs `server.js` from target and not `root-only.js`
+        let mut cmd = super::command_for_completion();
+        let mut out = Vec::new();
+        crate::completion::VP_FISH
+            .write_complete(
+                &mut cmd,
+                ["vp", "-C", "apps/server", "node", ""]
+                    .into_iter()
+                    .map(std::ffi::OsString::from)
+                    .collect(),
+                Some(dir.path()),
+                &mut out,
+            )
+            .unwrap();
+        std::env::set_current_dir(original_cwd).unwrap();
+
+        let output = String::from_utf8(out).unwrap();
+        assert!(
+            output.lines().any(|line| line.starts_with("server.js")),
+            "expected `server.js` from -C target directory, got: {output:?}"
+        );
+        assert!(
+            !output.lines().any(|line| line.starts_with("root-only.js")),
+            "did not expect `root-only.js` from parent directory, got: {output:?}"
+        );
     }
 }

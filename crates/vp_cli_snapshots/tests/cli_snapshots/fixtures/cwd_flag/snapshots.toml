@@ -44,3 +44,61 @@ steps = [
   { argv = ["vp", "-C", "packages/hello", "env", "exec", "node", "-e", "console.log('PWD matches cwd: ' + (process.env.PWD === process.cwd()))"], comment = "-C form: the direct-exec child should see PWD synced to the target" },
   { argv = ["vp", "env", "exec", "node", "-e", "console.log('PWD matches cwd: ' + (process.env.PWD === process.cwd()))"], cwd = "packages/hello", comment = "equivalent cd form (baseline: true)" },
 ]
+
+[[case]]
+name = "cwd_flag_completion"
+vp = ["global"]
+skip-platforms = ["windows"]
+comment = """
+Dynamic shell completion for -C suggests directories when completing the flag
+value and resolves cwd-dependent completions (such as `vp run` tasks) from the
+target directory once the cursor moves past -C.
+"""
+steps = [
+  { argv = ["vpt", "write-file", "node_modules/vite-plus/package.json", "{\"name\":\"vite-plus\",\"version\":\"0.0.0\"}\n"], snapshot = false },
+  { argv = ["vpt", "write-file", "node_modules/vite-plus/dist/bin.js", "const fs = require('node:fs'); const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); for (const [k, v] of Object.entries(pkg.scripts || {})) console.log(`${k}: ${v}`);\n"], snapshot = false },
+  { argv = ["vp", "--", "vp", "-C", "pack"], envs = [["VP_COMPLETE", "fish"]], comment = "completing -C suggests directories from the current working directory" },
+  { argv = ["vp", "--", "vp", "run", "w"], envs = [["VP_COMPLETE", "fish"]], comment = "without -C, run completion resolves tasks from the workspace root" },
+  { argv = ["vp", "--", "vp", "-C", "packages/hello", "run", "w"], envs = [["VP_COMPLETE", "fish"]], comment = "-C <dir> switches directory before resolving run task completions" },
+  { argv = ["vp", "--", "vp", "-C=packages/hello", "run", "w"], envs = [["VP_COMPLETE", "fish"]], comment = "-C=<dir> inline form also switches directory for completion" },
+  { argv = ["vp", "--", "vp", "-Cpackages/hello", "run", "w"], envs = [["VP_COMPLETE", "fish"]], comment = "-C<dir> attached form also switches directory for completion" },
+  { argv = ["vp", "--", "vp", "run", "w"], cwd = "packages/hello", envs = [["VP_COMPLETE", "fish"]], comment = "equivalent cd form for run completion" },
+]
+
+[[case]]
+name = "cwd_flag_shell_completion"
+vp = ["global"]
+skip-platforms = ["windows"]
+requires = ["bash", "zsh", "fish"]
+comment = """
+Shell completion adapters for Bash, Zsh, and Fish expand shell-local variables
+in -C <dir>, support `vpr -C` in Bash, and preserve single-quoted literal paths
+in Fish.
+"""
+steps = [
+  { argv = ["vpt", "write-file", "node_modules/vite-plus/package.json", "{\"name\":\"vite-plus\",\"version\":\"0.0.0\"}\n"], snapshot = false },
+  { argv = ["vpt", "write-file", "node_modules/vite-plus/dist/bin.js", "const fs = require('node:fs'); const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8')); for (const [k, v] of Object.entries(pkg.scripts || {})) console.log(`${k}: ${v}`);\n"], snapshot = false },
+  { argv = ["vpt", "write-file", "~/literal/package.json", "{\"name\":\"literal-tilde\",\"scripts\":{\"where:tilde\":\"echo tilde\"}}\n"], snapshot = false },
+  { argv = ["bash", "--noprofile", "--norc", "-c", "eval \"$(VP_COMPLETE=bash vp)\"; PROJECT=packages/hello; COMP_WORDS=(vpr -C '\"$PROJECT\"' w); COMP_CWORD=3; COMP_LINE='vpr -C \"$PROJECT\" w'; COMP_POINT=${#COMP_LINE}; _clap_complete_vpr; printf 'bash vpr -C $PROJECT: %s\\n' \"${COMPREPLY[*]}\"; COMP_WORDS=(vpr -C pack); COMP_CWORD=2; COMP_LINE='vpr -C pack'; COMP_POINT=${#COMP_LINE}; _clap_complete_vpr; printf 'bash vpr -C <dir>: %s\\n' \"${COMPREPLY[*]}\""], comment = "Bash expands unexported local $PROJECT and completes both vpr -C <dir> and tasks in <dir>" },
+  { argv = ["zsh", "-f", "-c", "compdef() { : }; eval \"$(VP_COMPLETE=zsh vp)\"; _describe() { local -a arr; eval \"arr=(\\\"\\${${3}[@]}\\\")\"; print -r -- \"zsh vp -C \\$PROJECT: ${arr[*]}\"; }; PROJECT=packages/hello; words=(vp -C '\"$PROJECT\"' run w); CURRENT=5; _clap_dynamic_completer_vp"], comment = "Zsh expands unexported local $PROJECT before invoking vp dynamic completion" },
+  { argv = ["fish", "--no-config", "-c", "VP_COMPLETE=fish vp | source; set -l PROJECT packages/hello; printf 'fish vp -C $PROJECT: %s\\n' (complete -C 'vp -C \"$PROJECT\" run w'); printf 'fish vp -C literal tilde: %s\\n' (complete -C \"vp -C '~/literal' run w\")"], comment = "Fish expands local $PROJECT and preserves single-quoted '~/literal' without home expansion" },
+]
+
+[[case]]
+name = "top_level_alias_completion"
+vp = ["global"]
+skip-platforms = ["windows"]
+comment = """
+Dynamic shell completion includes top-level commands rewritten by normalize_args
+(list/ls, rebuild, node, help), their flags/subcommands, and file path completion
+for `vp -C <dir> node <TAB>`.
+"""
+steps = [
+  { argv = ["vp", "--", "vp", "ls"], envs = [["VP_COMPLETE", "fish"]], comment = "top-level ls alias is completed" },
+  { argv = ["vp", "--", "vp", "list", "--dep"], envs = [["VP_COMPLETE", "fish"]], comment = "top-level list completes pm list flags" },
+  { argv = ["vp", "--", "vp", "ls", "--dep"], envs = [["VP_COMPLETE", "fish"]], comment = "top-level ls alias completes pm list flags" },
+  { argv = ["vp", "--", "vp", "reb"], envs = [["VP_COMPLETE", "fish"]], comment = "top-level rebuild command is completed" },
+  { argv = ["vp", "--", "vp", "no"], envs = [["VP_COMPLETE", "fish"]], comment = "top-level node command is completed" },
+  { argv = ["vp", "--", "vp", "help", "env", "u"], envs = [["VP_COMPLETE", "fish"]], comment = "top-level help completes nested subcommands and visible aliases" },
+  { argv = ["vp", "--", "vp", "-C", "packages/hello", "node", ""], envs = [["VP_COMPLETE", "fish"]], comment = "vp -C <dir> node <TAB> completes paths from the target directory" },
+]

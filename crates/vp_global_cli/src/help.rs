@@ -249,6 +249,10 @@ fn parse_clap_help_to_doc(raw_help: &str) -> Option<HelpDoc> {
     })
 }
 
+pub(crate) const TOP_LEVEL_NODE_ABOUT: &str =
+    "Run plain Node.js (`env exec node`); `vpx <file>` runs TypeScript";
+pub(crate) const TOP_LEVEL_REBUILD_ABOUT: &str = "Rebuild native modules";
+
 pub fn top_level_help_doc() -> HelpDoc {
     HelpDoc {
         usage: "vp [COMMAND]".into(),
@@ -284,10 +288,7 @@ pub fn top_level_help_doc() -> HelpDoc {
                 vec![
                     row("run", "Run tasks (also available as standalone `vpr`)"),
                     row("exec", "Execute a command from local node_modules/.bin"),
-                    row(
-                        "node",
-                        "Run plain Node.js (`env exec node`); `vpx <file>` runs TypeScript",
-                    ),
+                    row("node", TOP_LEVEL_NODE_ABOUT),
                     row("dlx", "Execute a package binary without installing it as a dependency"),
                     row("cache", "Manage the task cache"),
                 ],
@@ -313,7 +314,7 @@ pub fn top_level_help_doc() -> HelpDoc {
                     row("info, view, show", "View package information from the registry"),
                     row("link, ln", "Link packages for local development"),
                     row("unlink", "Unlink packages"),
-                    row("rebuild", "Rebuild native modules"),
+                    row("rebuild", TOP_LEVEL_REBUILD_ABOUT),
                     row("pm", "Forward a command to the package manager"),
                 ],
             ),
