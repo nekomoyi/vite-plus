@@ -54,7 +54,7 @@ pub struct Args {
     pub version: bool,
 
     /// Run as if vp was started in <DIR> instead of the current working directory
-    #[arg(short = 'C', value_name = "DIR")]
+    #[arg(short = 'C', value_name = "DIR", value_hint = clap::ValueHint::DirPath)]
     pub chdir: Option<String>,
 
     #[clap(subcommand)]
@@ -1514,5 +1514,31 @@ mod tests {
             .find_map(|(name, value)| (name == "npm_config_user_agent").then_some(value))
             .unwrap();
         assert!(user_agent.to_string_lossy().starts_with("vp/0.0.0 npm/10.9.2 "), "{user_agent:?}");
+    }
+
+    #[test]
+    fn chdir_flag_completes_only_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("apps")).unwrap();
+        std::fs::write(dir.path().join("README.md"), "hello").unwrap();
+
+        let mut cmd = super::command_with_help();
+        let args = vec![
+            std::ffi::OsString::from("vp"),
+            std::ffi::OsString::from("-C"),
+            std::ffi::OsString::from(""),
+        ];
+        let candidates = clap_complete::engine::complete(&mut cmd, args, 2, Some(dir.path()))
+            .expect("completion should succeed");
+        let values: Vec<String> =
+            candidates.into_iter().map(|c| c.get_value().to_string_lossy().into_owned()).collect();
+        assert!(
+            values.iter().any(|v| v == "apps/" || v == "apps\\"),
+            "expected directory candidate for -C, got {values:?}"
+        );
+        assert!(
+            !values.iter().any(|v| v.contains("README.md")),
+            "did not expect file candidate for -C, got {values:?}"
+        );
     }
 }

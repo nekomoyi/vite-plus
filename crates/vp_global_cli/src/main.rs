@@ -15,6 +15,7 @@
 mod cli;
 mod command_picker;
 mod commands;
+mod completion;
 mod error;
 mod help;
 mod homebrew;
@@ -30,7 +31,6 @@ use std::{
     process::{ExitCode, ExitStatus},
 };
 
-use clap_complete::env::CompleteEnv;
 use console::style;
 use vp_cli_help::error::{
     extract_invalid_subcommand_details, extract_unknown_argument, has_pass_as_value_suggestion,
@@ -48,10 +48,10 @@ use crate::cli::{
 /// user arguments (argv without the binary name), mirroring clap's
 /// short-option grammar (and bin.ts on the local path). Returns the
 /// directory and how many tokens it consumed.
-pub(crate) fn parse_leading_chdir(user_args: &[String]) -> Option<(String, usize)> {
-    let first = user_args.first()?;
+pub(crate) fn parse_leading_chdir<T: AsRef<str>>(user_args: &[T]) -> Option<(String, usize)> {
+    let first = user_args.first()?.as_ref();
     if first == "-C" {
-        return user_args.get(1).map(|dir| (dir.clone(), 2));
+        return user_args.get(1).map(|dir| (dir.as_ref().to_string(), 2));
     }
     if let Some(rest) = first.strip_prefix("-C") {
         let dir = rest.strip_prefix('=').unwrap_or(rest);
@@ -346,27 +346,8 @@ async fn main() -> ExitCode {
 
     let mut args: Vec<String> = std::env::args().collect();
 
-    // Replace bash completion script to fix completion for items containing ':'
-    if env::var_os("VP_COMPLETE").is_some_and(|shell| shell == "bash") && args.len() == 1 {
-        vp_shared::output::print_stdout(format_args!(
-            "{}",
-            include_str!("../completion-register.bash")
-        ));
-        return ExitCode::SUCCESS;
-    }
-
-    // Handle shell completion
-    // `complete()` exits before the normal `-C` handling below runs, so apply
-    // the target directory here too: cwd-sensitive completers (run tasks)
-    // should suggest from <dir>, where the completed command will run.
-    if env::var_os("VP_COMPLETE").is_some()
-        && let Some((dir, _)) = parse_leading_chdir(&args[1..])
-        && let Ok(current) = vt_path::current_dir()
-    {
-        // Best-effort and silent: mid-typing values are often not (yet) dirs.
-        let _ = apply_chdir(&current, &dir);
-    }
-    CompleteEnv::with_factory(command_with_help).var("VP_COMPLETE").complete();
+    // Handle shell completion (registration and dynamic completion with `-C` support)
+    completion::complete(command_with_help);
 
     // Check for shim mode (invoked as node, npm, or npx)
     let argv0 = args.first().map(|s| s.as_str()).unwrap_or("vp");
