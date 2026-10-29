@@ -3018,4 +3018,76 @@ _vpr_complete
             );
         });
     }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_bash_vpr_completion_preserves_chdir_and_colon_tasks() {
+        use std::process::Command;
+
+        if Command::new("bash").arg("-c").arg("exit 0").status().is_err() {
+            return;
+        }
+
+        let temp_dir = TempDir::new().unwrap();
+        let capture_file = temp_dir.path().join("capture.txt");
+        let script = include_str!("../../../completion-register.bash");
+        let output = Command::new("bash")
+            .arg("--noprofile")
+            .arg("--norc")
+            .arg("-c")
+            .arg(
+                r#"eval "$1"
+capture_file="$2"
+vp() {
+    shift # discard "--"
+    printf '%s|%s|%s|%s|%s|%s\n' "$_CLAP_COMPLETE_INDEX" "${1-}" "${2-}" "${3-}" "${4-}" "${5-}" >> "$capture_file"
+    printf 'build:prod\n'
+}
+
+COMP_WORDBREAKS=":"
+COMP_TYPE=9
+
+# 1. Cursor on -C argument value while a task follows
+COMP_WORDS=(vpr -C "" build)
+COMP_CWORD=2
+COMP_LINE='vpr -C "" build'
+_clap_complete_vpr
+
+# 2. Cursor on task after -C dir
+COMP_WORDS=(vpr -C dir build)
+COMP_CWORD=3
+COMP_LINE='vpr -C dir build'
+_clap_complete_vpr
+
+# 3. Cursor on attached -Cdir while a task follows
+COMP_WORDS=(vpr -Cdir build)
+COMP_CWORD=1
+COMP_LINE='vpr -Cdir build'
+_clap_complete_vpr
+
+# 4. Completing -C value when no task is typed yet
+COMP_WORDS=(vpr -C "")
+COMP_CWORD=2
+COMP_LINE='vpr -C '
+_clap_complete_vpr
+
+# 5. Colon task after -C dir: reassembles build:p and trims build: prefix
+COMP_WORDS=(vpr -C dir build : p)
+COMP_CWORD=5
+COMP_LINE='vpr -C dir build:p'
+_clap_complete_vpr
+printf 'trimmed=%s\n' "${COMPREPLY[0]-}" >> "$capture_file"
+"#,
+            )
+            .arg("test-bash-vpr-completion")
+            .arg(script)
+            .arg(&capture_file)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "bash completion script should run");
+        assert_eq!(
+            std::fs::read_to_string(&capture_file).unwrap(),
+            "2|vp|-C||run|build\n4|vp|-C|dir|run|build\n1|vp|-Cdir|run|build|\n2|vp|-C|||\n4|vp|-C|dir|run|build:p\ntrimmed=prod\n"
+        );
+    }
 }
