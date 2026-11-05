@@ -12,6 +12,7 @@ name = "vp"
 path = "src/main.rs"
 
 [dependencies]
+shlex = "2.0.1"
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "string"] }
 clap_complete = { workspace = true, features = ["unstable-dynamic"] }

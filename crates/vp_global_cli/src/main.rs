@@ -408,10 +408,21 @@ async fn main() -> ExitCode {
     // the target directory here too: cwd-sensitive completers (run tasks)
     // should suggest from <dir>, where the completed command will run.
     if env::var_os("VP_COMPLETE").is_some()
-        && let Some((dir, _)) = parse_leading_chdir(&args[1..])
+        && let Some(sep) = args.iter().position(|a| a == "--")
+        && let Some(user_args) = args.get(sep + 2..)
+        && let Some((mut dir, consumed)) = parse_leading_chdir(user_args)
+        && env::var("_CLAP_COMPLETE_INDEX")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(user_args.len())
+            > consumed
         && let Ok(current) = vt_path::current_dir()
     {
-        // Best-effort and silent: mid-typing values are often not (yet) dirs.
+        if env::var_os("VP_COMPLETE").is_some_and(|s| s == "bash") {
+            let Some(parts) = shlex::split(&dir) else { return ExitCode::SUCCESS };
+            let [value] = parts.as_slice() else { return ExitCode::SUCCESS };
+            dir = value.clone();
+        }
         let _ = apply_chdir(&current, &dir);
     }
     CompleteEnv::with_factory(command_for_completion).var("VP_COMPLETE").complete();

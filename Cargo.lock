@@ -8487,6 +8487,7 @@ dependencies = [
  "same-file",
  "serde",
  "serde_json",
+ "shlex",
  "serial_test",
  "tar",
  "temp-env",
