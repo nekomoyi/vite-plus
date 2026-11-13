@@ -21,6 +21,8 @@ pub(super) async fn configure() -> Result<(), Error> {
             ShellProfileRoot::Fish => "fish",
             ShellProfileRoot::NushellConfig => continue,
             ShellProfileRoot::NushellData => "nu",
+            #[cfg(any(windows, test))]
+            ShellProfileRoot::PowerShellDocuments => continue,
         };
         if super::find_on_path(shell).is_none() {
             continue;
@@ -92,6 +94,13 @@ pub(super) async fn configure() -> Result<(), Error> {
     }
     #[cfg(windows)]
     {
+        if let Err(err) =
+            crate::commands::shell::configure_powershell_profiles(&config, None, false, |s| {
+                super::find_on_path(s).is_some()
+            })
+        {
+            tracing::warn!("Failed to configure PowerShell profile: {}", err);
+        }
         let bin = setup::escape_powershell_single_quoted_string(&config.dirs.bin.to_string());
         let fallback =
             setup::escape_powershell_single_quoted_string(&config.dirs.fallback_bin().to_string());
