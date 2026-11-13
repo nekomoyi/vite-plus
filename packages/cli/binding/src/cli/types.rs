@@ -36,49 +36,81 @@ pub enum SynthesizableSubcommand {
     /// Lint code
     #[command(disable_help_flag = true)]
     Lint {
-        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        #[clap(
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+            value_hint = clap::ValueHint::AnyPath
+        )]
         args: Vec<String>,
     },
     /// Format code
     #[command(disable_help_flag = true, visible_alias = "format")]
     Fmt {
-        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        #[clap(
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+            value_hint = clap::ValueHint::AnyPath
+        )]
         args: Vec<String>,
     },
     /// Build for production
     #[command(disable_help_flag = true)]
     Build {
-        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        #[clap(
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+            value_hint = clap::ValueHint::AnyPath
+        )]
         args: Vec<String>,
     },
     /// Run tests
     #[command(disable_help_flag = true)]
     Test {
-        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        #[clap(
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+            value_hint = clap::ValueHint::AnyPath
+        )]
         args: Vec<String>,
     },
     /// Build library
     #[command(disable_help_flag = true)]
     Pack {
-        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        #[clap(
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+            value_hint = clap::ValueHint::AnyPath
+        )]
         args: Vec<String>,
     },
     /// Run the development server
     #[command(disable_help_flag = true)]
     Dev {
-        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        #[clap(
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+            value_hint = clap::ValueHint::AnyPath
+        )]
         args: Vec<String>,
     },
     /// Preview production build
     #[command(disable_help_flag = true)]
     Preview {
-        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        #[clap(
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+            value_hint = clap::ValueHint::AnyPath
+        )]
         args: Vec<String>,
     },
     /// Build documentation
     #[command(disable_help_flag = true, hide = true)]
     Doc {
-        #[clap(allow_hyphen_values = true, trailing_var_arg = true)]
+        #[clap(
+            allow_hyphen_values = true,
+            trailing_var_arg = true,
+            value_hint = clap::ValueHint::AnyPath
+        )]
         args: Vec<String>,
     },
     /// Run format, lint, and type checks
@@ -108,7 +140,7 @@ pub enum SynthesizableSubcommand {
         #[arg(long = "no-error-on-unmatched-pattern")]
         no_error_on_unmatched_pattern: bool,
         /// File paths to check (passed through to fmt and lint)
-        #[arg(trailing_var_arg = true)]
+        #[arg(trailing_var_arg = true, value_hint = clap::ValueHint::AnyPath)]
         paths: Vec<String>,
     },
 }

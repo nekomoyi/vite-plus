@@ -71,6 +71,7 @@ F	h	help			Show this help message
 C	1	enable				Install or refresh the hook dispatcher (sets core.hooksPath)
 F		hooks-dir	v	dir	Custom hooks directory (default: .vite-hooks, or last used)
 F	h	help			Show this help message
+F		replace-husky			Replace a local Husky hooks path after migrating custom checks (old files are preserved but no longer run)
 C	1	disable				Disable hooks: unset core.hooksPath, remove <dir>/_, persist preference
 F		hooks-dir	v	dir	Custom hooks directory (default: .vite-hooks, or last used)
 F	h	help			Show this help message

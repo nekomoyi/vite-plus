@@ -18,7 +18,12 @@ struct CreateCliArgs {
     #[arg(value_name = "TEMPLATE", help = "Builtin, local, or remote template name")]
     template: Option<String>,
 
-    #[arg(long, value_name = "DIR", help = "Target directory for the generated project")]
+    #[arg(
+        long,
+        value_name = "DIR",
+        value_hint = clap::ValueHint::DirPath,
+        help = "Target directory for the generated project"
+    )]
     directory: Option<String>,
 
     #[arg(
@@ -141,7 +146,7 @@ struct CreateCliArgs {
     template_args: Vec<String>,
 }
 
-fn create_command() -> Command {
+pub(crate) fn create_command() -> Command {
     CreateCliArgs::augment_args(
         Command::new("vp create")
             .about("Use any builtin, local or remote template with Vite+.")
