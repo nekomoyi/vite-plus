@@ -1,0 +1,47 @@
+[[case]]
+name = "shell_completion_zsh"
+vp = "global"
+skip-platforms = ["windows"]
+requires = ["zsh"]
+steps = [
+  { argv = ["vp", "env", "setup", "--refresh"], snapshot = false },
+  { argv = ["zsh", "-f", "assert_zsh.sh"], comment = "verifies real interactive Zsh Tab completion via zpty across aliases, -C tasks, flags, and script paths" },
+]
+
+[[case]]
+name = "shell_completion_bash"
+vp = "global"
+skip-platforms = ["windows"]
+requires = ["bash"]
+steps = [
+  { argv = ["vp", "env", "setup", "--refresh"], envs = [["VP_HOME", "${workspace}/home"]], snapshot = false },
+  { argv = ["bash", "--noprofile", "--norc", "assert_bash.sh"], comment = "verifies Bash completion across aliases, -C tasks, colon tasks, deps, workspace filters, flags, and vpx scripts" },
+]
+
+[[case]]
+name = "shell_completion_fish"
+vp = "global"
+skip-platforms = ["windows"]
+requires = ["fish"]
+steps = [
+  { argv = ["vp", "env", "setup", "--refresh"], envs = [["VP_HOME", "${workspace}/home"]], snapshot = false },
+  { argv = ["fish", "assert_fish.fish"], comment = "verifies Fish completion across aliases, -C tasks, colon tasks, deps, workspace filters, flags, and vpx scripts" },
+]
+
+[[case]]
+name = "shell_completion_nushell"
+vp = "global"
+requires = ["nu"]
+steps = [
+  { argv = ["vp", "env", "setup", "--refresh"], snapshot = false },
+  { argv = ["nu", "-n", "assert_nu.nu"], comment = "verifies Nushell completion across aliases, -C tasks, colon tasks, deps, workspace filters, flags, and vpx scripts" },
+]
+
+[[case]]
+name = "shell_completion_powershell"
+vp = "global"
+requires = ["pwsh"]
+steps = [
+  { argv = ["vp", "env", "setup", "--refresh"], snapshot = false },
+  { argv = ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File", "assert_pwsh.ps1"], comment = "verifies PowerShell completion across aliases, -C tasks, colon tasks, deps, workspace filters, flags, vpx scripts, pipeline isolation, and LASTEXITCODE" },
+]

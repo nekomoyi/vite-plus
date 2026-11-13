@@ -1,0 +1,11 @@
+{
+  "name": "fixture-shell-completion",
+  "private": true,
+  "scripts": {
+    "build:watch": "vite build --watch",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "react": "^19.0.0"
+  }
+}

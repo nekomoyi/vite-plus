@@ -1,0 +1,7 @@
+{
+  "name": "@demo/subpkg",
+  "version": "1.0.0",
+  "scripts": {
+    "sub:task": "echo sub"
+  }
+}
