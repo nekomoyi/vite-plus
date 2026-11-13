@@ -8,7 +8,11 @@ use crate::js_command_args::parser::{CliParseError, ParseResult, help_arg, parse
 
 #[derive(Debug, Args)]
 struct MigrateCliArgs {
-    #[arg(value_name = "PATH", help = "Target directory to migrate (default: current directory)")]
+    #[arg(
+        value_name = "PATH",
+        value_hint = clap::ValueHint::DirPath,
+        help = "Target directory to migrate (default: current directory)"
+    )]
     path: Option<String>,
 
     #[arg(
@@ -85,7 +89,7 @@ struct MigrateCliArgs {
     full: bool,
 }
 
-fn migrate_command() -> Command {
+pub(crate) fn migrate_command() -> Command {
     MigrateCliArgs::augment_args(
         Command::new("vp migrate")
             .about("Migrate existing toolchains to Vite+.")

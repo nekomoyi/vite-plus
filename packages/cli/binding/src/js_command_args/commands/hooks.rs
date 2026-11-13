@@ -28,6 +28,7 @@ struct HooksActionArgs {
     #[arg(
         long,
         value_name = "path",
+        value_hint = clap::ValueHint::DirPath,
         help = "Custom hooks directory (default: .vite-hooks, or last used)"
     )]
     hooks_dir: Option<String>,
@@ -36,7 +37,7 @@ struct HooksActionArgs {
     help: Option<bool>,
 }
 
-fn hooks_command() -> Command {
+pub(crate) fn hooks_command() -> Command {
     HooksCliArgs::augment_args(
         Command::new("vp hooks")
             .about("Manage the Vite+ Git hook dispatcher for this repository.")

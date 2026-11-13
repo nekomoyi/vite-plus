@@ -64,6 +64,7 @@ struct StagedCliArgs {
     #[arg(
         long,
         value_name = "path",
+        value_hint = clap::ValueHint::DirPath,
         value_parser = NonEmptyStringValueParser::new(),
         help = "Working directory to run all tasks in"
     )]
@@ -139,7 +140,7 @@ struct StagedCliArgs {
     verbose: bool,
 }
 
-fn staged_command() -> Command {
+pub(crate) fn staged_command() -> Command {
     StagedCliArgs::augment_args(
         Command::new("vp staged")
             .about("Run linters on staged files using staged config from vite.config.ts.")

@@ -8385,6 +8385,7 @@ dependencies = [
  "uuid",
  "vp_cli_help",
  "vp_command",
+ "vp_complete",
  "vp_error",
  "vp_migration",
  "vp_pm_cli",

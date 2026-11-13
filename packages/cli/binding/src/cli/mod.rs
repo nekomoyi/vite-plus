@@ -680,4 +680,71 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn cli_args_subcommands_and_flags_match_expectations() {
+        use std::collections::HashSet;
+
+        use clap::{CommandFactory as _, Subcommand as _};
+
+        use super::types::CLIArgs;
+
+        let mut cli_cmd = CLIArgs::command();
+        cli_cmd.build();
+
+        // PackageManagerCommand subcommands are already compiled directly into vp_global_cli
+        // via vp_pm_cli::PackageManagerCommand and collected live via CmdSpec::from_clap.
+        let pm_probe =
+            vp_pm_cli::PackageManagerCommand::augment_subcommands(clap::Command::new("pm_probe"));
+        let pm_names: HashSet<String> =
+            pm_probe.get_subcommands().map(|s| s.get_name().to_string()).collect();
+
+        let mut specs = Vec::new();
+        for sub in cli_cmd.get_subcommands() {
+            let name = sub.get_name();
+            if name == "help" || pm_names.contains(name) {
+                continue;
+            }
+            let mut spec = vp_complete::CmdSpec::from_clap(sub);
+            // Synthesizable passthrough stubs (`disable_help_flag = true`) still forward `-h`/`--help`
+            // to their underlying tool (Vite, Vitest, Oxlint, Oxfmt, tsdown).
+            if !spec.flags.iter().any(|f| f.long.as_deref() == Some("help")) {
+                spec.flags
+                    .push(vp_complete::FlagSpec::new().short('h').long("help").about("Print help"));
+            }
+            specs.push(spec);
+        }
+
+        for js_cmd in crate::js_command_args::commands::all_commands() {
+            let mut spec = vp_complete::CmdSpec::from_clap(&js_cmd);
+            if let Some(stripped) = spec.name.strip_prefix("vp ") {
+                spec.name = stripped.to_string();
+            }
+            if let Some(pos) = specs.iter().position(|s| s.name == spec.name) {
+                specs[pos] = spec;
+            } else {
+                specs.push(spec);
+            }
+        }
+
+        specs.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let generator_cmd = "VP_UPDATE_CLI_SPECS=1 cargo test -p vite-plus-cli --lib cli_args_subcommands_and_flags_match_expectations";
+        let rendered = vp_complete::render_local_specs_tsv(&specs, generator_cmd);
+
+        let generated_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../crates/vp_complete/src/local_specs.tsv");
+        if std::env::var_os("VP_UPDATE_CLI_SPECS").is_some()
+            || std::env::var_os("UPDATE_SNAPSHOTS").is_some()
+        {
+            std::fs::write(&generated_path, &rendered).unwrap();
+        }
+        let expected =
+            std::fs::read_to_string(&generated_path).unwrap_or_default().replace('\r', "");
+        pretty_assertions::assert_eq!(
+            expected,
+            rendered,
+            "crates/vp_complete/src/local_specs.tsv is out of sync with vite-plus-cli Clap definitions. Run `{generator_cmd}` to regenerate automatically."
+        );
+    }
 }
