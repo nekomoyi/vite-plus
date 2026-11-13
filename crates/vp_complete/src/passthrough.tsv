@@ -1,0 +1,230 @@
+# Declarative external-tool passthrough flag overlays (short\tlong\tmods\thint\tabout)
+[vpx_extra]
+	tsconfig	v	file:json	tsconfig.json to use when running a script
+	watch			Rerun the script when a file it uses changes
+	include	v		Watch files matching pattern
+	exclude	v		Exclude files matching pattern
+	ignore	v		Ignore files matching pattern
+	kill-signal	v		Signal used to kill process in watch mode
+	kill-timeout	v		Timeout before force-killing process
+C	conditions	v		Node.js export conditions
+e	eval	v		Evaluate script
+r	require	v		Preload CommonJS module
+	import	v		Preload ES module
+	env-file	v	file	Load environment variables from file
+	inspect			Enable Node.js inspector
+	inspect-brk			Enable Node.js inspector and break
+v	version			Print version
+h	help			Print help
+[vite_common]
+	base	v		Public base path
+l	logLevel	v	vals:info,warn,error,silent	Log level
+	clearScreen			Allow/disable clear screen
+d	debug			Show debug logs
+f	filter	v		Filter debug logs
+m	mode	v		Set env mode
+c	config	v	file:js,ts,mjs,mts	Config file
+[vite_server]
+	host			Specify hostname
+	port	v		Specify port
+	open			Open browser on startup
+	cors			Enable CORS
+	strictPort			Exit if specified port is already in use
+	force			Force optimizer to re-bundle
+	experimentalBundle			Use experimental full bundle mode
+[vite_build]
+	target	v		Transpile target
+	outDir	v	dir	Output directory
+	assetsDir	v	dir	Assets directory under outDir
+	assetsInlineLimit	v		Asset base64 inline threshold
+	ssr			Build specified entry for SSR
+	sourcemap			Output source maps
+	minify			Enable/disable minification
+	manifest			Emit build manifest json
+	ssrManifest			Emit ssr manifest json
+	emptyOutDir			Force empty outDir
+w	watch			Rebuild when modules change
+	app			Same as builder: {}
+[vite_preview]
+	host			Specify hostname
+	port	v		Specify port
+	strictPort			Exit if port is in use
+	open			Open browser on startup
+	outDir	v	dir	Output directory
+[oxlint]
+c	config	v	file:json,js,cjs,mjs,ts	Path to config file
+	tsconfig	v	file:json	Path to tsconfig.json
+	fix			Fix problems
+	fix-suggestions			Apply auto-fixable suggestions
+	fix-dangerously			Apply dangerous fixes and suggestions
+f	format	v	vals:checkstyle,default,agent,github,gitlab,json,junit,sarif,stylish,unix,sonarlint	Output format
+	quiet			Disable reporting on warnings
+	deny-warnings			Treat warnings as errors
+	max-warnings	v		Max warnings allowed
+	import-plugin			Enable import plugin
+	jsdoc-plugin			Enable jsdoc plugin
+	jest-plugin			Enable jest plugin
+	vitest-plugin			Enable vitest plugin
+	jsx-a11y-plugin			Enable jsx-a11y plugin
+	nextjs-plugin			Enable nextjs plugin
+	react-plugin			Enable react plugin
+	react-perf-plugin			Enable react performance plugin
+	promise-plugin			Enable promise plugin
+	node-plugin			Enable node plugin
+	unicorn-plugin			Enable unicorn plugin
+	disable-unicorn-plugin			Disable unicorn plugin
+	disable-oxc-plugin			Disable oxc unique rules
+	disable-typescript-plugin			Disable typescript plugin
+	vue-plugin			Enable vue plugin
+	type-aware			Enable rules that require type information
+	type-check			Enable experimental type checking
+	rules			List all rules
+	lsp			Run as language server
+	init			Initialize config file
+	ignore-path	v	file	Specify ignore file
+	ignore-pattern	v		Pattern of files to ignore
+	no-ignore			Disable ignore files
+	symlinks			Follow symlinks
+	threads	v		Number of threads to use
+	debug			Enable debug output
+	silent			Do not display diagnostics
+	print-config			Print configuration
+	report-unused-disable-directives			Report unused disable directives
+	report-unused-disable-directives-severity	v		Severity level of unused disable directives
+	no-error-on-unmatched-pattern			Do not exit with error when pattern is unmatched
+A	allow	v		Allow rule or category
+W	warn	v		Warn on rule or category
+D	deny	v		Deny rule or category
+[oxfmt]
+c	config	v	file:json,js,cjs,mjs,ts	Path to config file
+	check			Check if files are formatted
+	list-different			List files that would be changed
+	write			Format and write files in place
+	init			Initialize configuration
+	migrate	v	vals:prettier,biome	Migrate config from another tool
+	lsp			Run as language server
+	stdin-filepath	v	file	Specify file name to infer parser
+	ignore-path	v	file	Path to ignore file
+	with-node-modules			Format code in node_modules directory
+	no-error-on-unmatched-pattern			Do not exit with error when pattern is unmatched
+	threads	v		Number of threads to use
+[vitest]
+r	root	v	dir	Root path
+c	config	v	file:js,ts,mjs,mts	Config file
+u	update			Update snapshot
+w	watch			Enable watch mode
+t	testNamePattern	v		Filter test names
+	dir	v	dir	Base directory to scan
+	ui			Enable UI
+	open			Open UI automatically
+	api			Specify server port
+	silent			Silent console output
+	hideSkippedTests			Hide skipped tests
+	reporter	v	vals:default,agent,minimal,blob,verbose,dot,json,tap,tap-flat,junit,tree,hanging-process,github-actions	Specify reporters
+	outputFile	v	file	Output file
+	coverage			Enable coverage report
+	mode	v		Override Vite mode
+	isolate			Run test files in isolation
+	no-isolate			Disable test file isolation
+	globals			Inject APIs globally
+	injectCjsGlobals			Inject CommonJS variables
+	no-inject-cjs-globals			Disable CommonJS variables
+	dom			Mock browser API
+	browser			Run tests in browser
+	pool	v	vals:threads,forks,vmThreads,vmForks,typescript	Specify pool
+	execArgv	v		Arguments for node process
+	vmMemoryLimit	v		Memory limit for VM pools
+	fileParallelism			Run test files in parallel
+	no-file-parallelism			Disable parallel test file runs
+	maxWorkers	v		Max workers
+	environment	v		Runner environment
+	passWithNoTests			Pass when no tests found
+	logHeapUsage			Show heap size
+	detectAsyncLeaks			Detect leaking async resources
+	allowOnly			Allow only tests
+	dangerouslyIgnoreUnhandledErrors			Ignore unhandled errors
+	shard	v		Test suite shard
+	changed			Run tests affected by changes
+	sinceLastRun			Run modified and failed tests
+	lastFailed			Run only failed tests
+	sequence	v		Sort options
+	inspect			Enable inspector
+	inspectBrk			Enable inspector and break
+	testTimeout	v		Test timeout in ms
+	hookTimeout	v		Hook timeout in ms
+	bail	v		Stop execution after failures
+	retry	v		Retry failed tests
+	repeats	v		Repeat tests
+	diff	v	file	Diff options path
+	exclude	v		Excluded globs
+	expandSnapshotDiff			Show full diff on snapshot fail
+	disableConsoleIntercept			Disable console intercept
+	typecheck			Enable typechecking
+p	project	v		Vitest project filter
+	slowTestThreshold	v		Slow test threshold ms
+	teardownTimeout	v		Teardown timeout ms
+	cache			Store test run cache
+	maxConcurrency	v		Max concurrent tests
+	fsModuleCache			Cache modules on fs
+	fsModuleCachePath	v	dir	Fs cache path
+	expect	v		Expect options
+	printConsoleTrace			Print console stack traces
+	includeTaskLocation			Collect test locations
+	attachmentsDir	v	dir	Attachments directory
+	run			Disable watch mode
+	no-color			Disable colors
+	clearScreen			Clear screen in watch mode
+	standalone			Start without running tests
+	merge-reports,mergeReports			Merge blob reports
+	listTags			List available tags
+	clearCache			Delete test caches
+	tagsFilter	v		Filter tests by tags
+	strictTags			Error on undefined tags
+	sharedViteServer			Reuse Vite server
+	experimental	v		Experimental features
+[tsdown]
+c	config	v	file:js,ts,mjs,mts,json	Config file
+	no-config			Disable config file
+d	out-dir	v	dir	Output directory
+f	format	v	vals:esm,cjs,iife,umd	Bundle format
+	platform	v	vals:node,browser,neutral	Target platform
+	target	v		Bundle target
+	dts			Generate DTS files
+	sourcemap			Generate source map
+	minify			Minify output
+w	watch			Watch mode
+	clean			Clean output directory
+	no-clean			Do not clean output directory
+	deps.never-bundle	v		Mark dependencies as external
+	treeshake			Tree-shake bundle
+	shims			Enable cjs/esm shims
+	exports			Generate export metadata
+	publint			Enable publint
+	attw			Enable are-the-types-wrong
+	unused			Check unused dependencies
+	from-vite			Reuse config from Vite/Vitest
+	report			Size report
+	env	v		Compile-time env
+	on-success	v		Command on success
+	copy	v	dir	Copy files to output dir
+	exe			Bundle as executable
+l	log-level,logLevel	v	vals:info,warn,error,silent	Log level
+	devtools			Enable devtools integration
+	fail-on-warn			Fail on warnings
+	no-write			Disable writing files to disk
+	ignore-watch	v	file	Ignore paths in watch mode
+	env-file	v	file	Load env from file
+	env-prefix	v		Prefix for bundle env
+	tsconfig	v	file:json	Set tsconfig path
+	unbundle			Unbundle mode
+	root	v	dir	Root directory
+W	workspace			Workspace mode
+	concurrency	v		Max builds in parallel
+F	filter	vm		Filter configs
+[vitepress]
+	outDir	v	dir	Output directory
+	base	v		Base path
+	port	v		Port
+	host			Host
+	open			Open browser
+	debug			Debug logs

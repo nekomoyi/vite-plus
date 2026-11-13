@@ -2,7 +2,7 @@
 # Do not edit manually; modify the source Clap definitions instead.
 C	0	build				Build for production
 F	h	help			Print help
-P	args	m	any
+P	args	mt	any
 C	0	cache				Manage the task cache
 F	h	help			Print help
 C	1	clean				Clean up all the cache
@@ -17,7 +17,7 @@ F		no-fmt			Skip format check
 F		no-lint			Skip lint rules; type-check still runs when `lint.options.typeCheck` is true
 F		no-error-on-unmatched-pattern			Do not exit with error when pattern is unmatched
 F	h	help			Print help
-P	paths	m	any	File paths to check (passed through to fmt and lint)
+P	paths	mt	any	File paths to check (passed through to fmt and lint)
 C	0	config				Configure Vite+ for the current project (hook dispatcher + agent integration)
 F		hooks-dir	v	dir	Custom hooks directory (default: .vite-hooks, or last used in this clone)
 F		hooks			Install the hook dispatcher
@@ -46,10 +46,10 @@ P	template			Builtin, local, or remote template name
 P	template_args	ml		Arguments passed to the template without changes
 C	0	dev				Run the development server
 F	h	help			Print help
-P	args	m	any
+P	args	mt	any
 C	0	doc			h	Build documentation
 F	h	help			Print help
-P	args	m	any
+P	args	mt	any
 C	0	exec				Execute a command from local node_modules/.bin
 F	r	recursive			Select all packages in the workspace
 F	t	transitive			Select the current package and its transitive dependencies
@@ -62,10 +62,10 @@ F		reverse			Reverse execution order
 F		resume-from	v		Resume from a specific package
 F		report-summary			Save results to vp-exec-summary.json
 F	h	help			Print help (see more with '--help')
-P	command	m		Command and arguments to execute
+P	command	mt		Command and arguments to execute
 C	0	fmt	format			Format code
 F	h	help			Print help
-P	args	m	any
+P	args	mt	any
 C	0	hooks				Manage the Vite+ Git hook dispatcher for this repository
 F	h	help			Show this help message
 C	1	enable				Install or refresh the hook dispatcher (sets core.hooksPath)
@@ -79,7 +79,7 @@ F		hooks-dir	v	dir	Custom hooks directory (default: .vite-hooks, or last used)
 F	h	help			Show this help message
 C	0	lint				Lint code
 F	h	help			Print help
-P	args	m	any
+P	args	mt	any
 C	0	migrate				Migrate existing toolchains to Vite+
 F		agent	vm		Write coding agent instructions to AGENTS.md, CLAUDE.md, etc
 F		no-agent			Skip writing coding agent instructions
@@ -94,10 +94,10 @@ F	h	help			Show this help message
 P	path		dir	Target directory to migrate (default: current directory)
 C	0	pack				Build library
 F	h	help			Print help
-P	args	m	any
+P	args	mt	any
 C	0	preview				Preview production build
 F	h	help			Print help
-P	args	m	any
+P	args	mt	any
 C	0	run				Run tasks
 F	r	recursive			Select all packages in the workspace
 F	t	transitive			Select the current package and its transitive dependencies
@@ -116,7 +116,7 @@ F		dry-run			Show what the run would do, and whether each command would hit the 
 F		last-details			Display the detailed summary of the last run
 F		json			Print JSON instead of text
 F	h	help			Print help (see more with '--help')
-P	task_and_args	m
+P	task_and_args	mt
 C	0	staged				Run linters on staged files using staged config from vite.config.ts
 F		allow-empty			Allow empty commits when tasks revert all staged changes
 F	p	concurrent	o		Run tasks at the same time
@@ -137,7 +137,7 @@ F	v	verbose			Show task output even when tasks succeed
 F	h	help			Show this help message
 C	0	test				Run tests
 F	h	help			Print help
-P	args	m	any
+P	args	mt	any
 C	0	toolchain				Show active Vite+ tools, versions, and relationships
 F		json			Print the graph as JSON
 F	g	global			Use the global Vite+ toolchain

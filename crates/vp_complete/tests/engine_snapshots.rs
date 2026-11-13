@@ -951,3 +951,250 @@ fn test_dotdot_navigation_missing_dir_and_path_completion_metadata() {
     assert_eq!(pc.flag_prefix, "-C=");
     assert_eq!(pc.mode, PathMode::DirsOnly);
 }
+
+fn test_read_manifest(dir: &std::path::Path) -> Option<vp_complete::project::PkgManifest> {
+    let bytes = fs::read(dir.join("package.json")).ok()?;
+    let val: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let name = val.get("name").and_then(|v| v.as_str()).map(str::to_string);
+    let workspaces = val.get("workspaces").and_then(|w| {
+        w.as_array().map(|arr| arr.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+    });
+    let scripts = val
+        .get("scripts")
+        .and_then(|s| s.as_object())
+        .map(|m| {
+            m.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
+        })
+        .unwrap_or_default();
+    let mut deps = Vec::new();
+    for (sec, label) in [("dependencies", "dep"), ("devDependencies", "devDep")] {
+        if let Some(obj) = val.get(sec).and_then(|v| v.as_object()) {
+            for (k, v) in obj {
+                deps.push((k.clone(), v.as_str().unwrap_or("").to_string(), label));
+            }
+        }
+    }
+    Some(vp_complete::project::PkgManifest { name, workspaces, scripts, deps })
+}
+
+fn test_vp_cfg(node_store: fn() -> PathBuf) -> vp_complete::project::VpCompletionConfig {
+    fn empty_dir() -> PathBuf {
+        PathBuf::new()
+    }
+    fn none_node() -> Option<PathBuf> {
+        None
+    }
+    fn none_bin_js(_: &std::path::Path) -> Option<PathBuf> {
+        None
+    }
+    vp_complete::project::VpCompletionConfig {
+        global_bin: empty_dir,
+        node_store,
+        resolve_node: none_node,
+        resolve_bin_js: none_bin_js,
+        read_manifest: test_read_manifest,
+    }
+}
+
+#[test]
+fn test_engine_optional_value_and_trailing_var_arg_and_lexer_fixes() {
+    use vp_complete::project::build_vp_spec;
+
+    fn empty_store() -> PathBuf {
+        PathBuf::new()
+    }
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let ws = temp.path();
+    fs::create_dir_all(ws.join("packages/sub")).unwrap();
+    fs::write(
+        ws.join("package.json"),
+        r#"{"name":"root","workspaces":["packages/*"],"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    fs::write(ws.join("packages/sub/package.json"), r#"{"name":"@demo/sub"}"#).unwrap();
+
+    let mut raw = clap::Command::new("vp");
+    let cfg = test_vp_cfg(empty_store);
+    let root = build_vp_spec(&mut raw, &cfg);
+
+    // 1. Optional flag value (`vp staged --concurrent <Tab>`, `vp staged --concurrent --al<Tab>`, `vp staged -p f<Tab>`)
+    let out_opt = complete(
+        &root,
+        None,
+        &CompletionRequest::new(
+            vec!["vp".into(), "staged".into(), "--concurrent".into(), "".into()],
+            3,
+            ws.to_path_buf(),
+        ),
+    );
+    let opt_vals: Vec<&str> = out_opt.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(opt_vals, vec!["true", "false"]);
+
+    let out_opt_next_flag = complete(
+        &root,
+        None,
+        &CompletionRequest::new(
+            vec!["vp".into(), "staged".into(), "--concurrent".into(), "--al".into()],
+            3,
+            ws.to_path_buf(),
+        ),
+    );
+    assert!(out_opt_next_flag.items.iter().any(|i| i.value == "--allow-empty"));
+
+    let out_short_opt = complete(
+        &root,
+        None,
+        &CompletionRequest::new(
+            vec!["vp".into(), "staged".into(), "-p".into(), "f".into()],
+            3,
+            ws.to_path_buf(),
+        ),
+    );
+    let short_opt_vals: Vec<&str> = out_short_opt.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(short_opt_vals, vec!["false"]);
+
+    // 2. Trailing vararg stops wrapper flag parsing (`vp exec node --fi`, `vp exec node --filter `, `vp run build --fi`, while `vp lint src/ --fi` still completes)
+    let out_exec_child = complete(
+        &root,
+        None,
+        &CompletionRequest::new(
+            vec!["vp".into(), "exec".into(), "node".into(), "--fi".into()],
+            3,
+            ws.to_path_buf(),
+        ),
+    );
+    assert!(
+        !out_exec_child.items.iter().any(|i| i.value == "--filter"),
+        "vp exec node --fi must not complete wrapper --filter: {:?}",
+        out_exec_child.items
+    );
+
+    let out_exec_child_val = complete(
+        &root,
+        None,
+        &CompletionRequest::new(
+            vec!["vp".into(), "exec".into(), "node".into(), "--filter".into(), "".into()],
+            4,
+            ws.to_path_buf(),
+        ),
+    );
+    assert!(
+        !out_exec_child_val.items.iter().any(|i| i.value == "@demo/sub"),
+        "vp exec node --filter <Tab> must not suggest workspace packages: {:?}",
+        out_exec_child_val.items
+    );
+
+    let out_run_child = complete(
+        &root,
+        None,
+        &CompletionRequest::new(
+            vec!["vp".into(), "run".into(), "build".into(), "--fi".into()],
+            3,
+            ws.to_path_buf(),
+        ),
+    );
+    assert!(!out_run_child.items.iter().any(|i| i.value == "--filter"));
+
+    let out_lint_flag = complete(
+        &root,
+        None,
+        &CompletionRequest::new(
+            vec!["vp".into(), "lint".into(), "src/".into(), "--fi".into()],
+            3,
+            ws.to_path_buf(),
+        ),
+    );
+    assert!(out_lint_flag.items.iter().any(|i| i.value == "--fix"));
+
+    // 3. Lexer: escaped newlines and redirections
+    let lex_cont = vp_complete::lexer::parse_bash_line("vp \\\n  run \\\n  bu", 17);
+    assert_eq!(lex_cont.words, vec!["vp", "run", "bu"]);
+
+    let lex_dq_cont = vp_complete::lexer::parse_bash_line("vp \"foo\\\nbar\"", 13);
+    assert_eq!(lex_dq_cont.words, vec!["vp", "foobar"]);
+
+    let lex_redir1 = vp_complete::lexer::parse_bash_line("vp 2>/dev/null bu", 17);
+    assert_eq!(lex_redir1.words, vec!["vp", "bu"]);
+
+    let lex_redir2 = vp_complete::lexer::parse_bash_line("vp 2>&1 bu", 10);
+    assert_eq!(lex_redir2.words, vec!["vp", "bu"]);
+
+    // 4. Path: ~// resolves under home instead of root /
+    let home = ws.join("fake_home");
+    fs::create_dir_all(home.join("proj")).unwrap();
+    let tilde_slash =
+        vp_complete::path::complete_path_with_home(ws, Some(&home), "~//pr", PathMode::DirsOnly);
+    assert_eq!(tilde_slash.items[0].value, "~//proj/");
+}
+
+#[test]
+fn test_workspace_yaml_globs_ancestor_fallback_and_node_semver() {
+    use vp_complete::project::{
+        build_vp_spec, extract_tasks_pure_rust_with, get_workspace_package_names_with,
+    };
+
+    let temp = tempfile::TempDir::new().unwrap();
+    let ws = temp.path();
+
+    // Unindented pnpm-workspace.yaml list + {apps,packages}/* + [ab] char class + negation
+    fs::write(
+        ws.join("pnpm-workspace.yaml"),
+        "packages:\n- '{apps,packages}/*'\n- 'tools/t[12]'\n- '!packages/ignored'\n",
+    )
+    .unwrap();
+    fs::create_dir_all(ws.join("apps/web/src/nested")).unwrap();
+    fs::create_dir_all(ws.join("packages/core")).unwrap();
+    fs::create_dir_all(ws.join("packages/ignored")).unwrap();
+    fs::create_dir_all(ws.join("tools/t1")).unwrap();
+    fs::create_dir_all(ws.join("tools/t9")).unwrap();
+
+    fs::write(
+        ws.join("apps/web/package.json"),
+        r#"{"name":"@demo/web","dependencies":{"react":"^19.0.0"},"scripts":{"web:dev":"vite"}}"#,
+    )
+    .unwrap();
+    fs::write(ws.join("packages/core/package.json"), r#"{"name":"@demo/core"}"#).unwrap();
+    fs::write(ws.join("packages/ignored/package.json"), r#"{"name":"@demo/ignored"}"#).unwrap();
+    fs::write(ws.join("tools/t1/package.json"), r#"{"name":"@demo/t1"}"#).unwrap();
+    fs::write(ws.join("tools/t9/package.json"), r#"{"name":"@demo/t9"}"#).unwrap();
+
+    let pkgs = get_workspace_package_names_with(ws, test_read_manifest);
+    assert_eq!(pkgs, vec!["@demo/core", "@demo/t1", "@demo/web"]);
+
+    // Subdirectory `vp remove` and pure-Rust task fallback walk ancestors
+    let nested_dir = ws.join("apps/web/src/nested");
+    let tasks = extract_tasks_pure_rust_with(&nested_dir, "web:", test_read_manifest);
+    assert_eq!(tasks.iter().map(|t| t.value.as_str()).collect::<Vec<_>>(), vec!["web:dev"]);
+
+    let store = ws.join("node_store");
+    fs::create_dir_all(store.join("v26.0.0-rc.9")).unwrap();
+    fs::create_dir_all(store.join("v26.0.0-rc.10")).unwrap();
+    fs::create_dir_all(store.join("v26.0.0")).unwrap();
+    static STORE_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    let _ = STORE_DIR.set(store);
+    let mut raw = clap::Command::new("vp")
+        .subcommand(clap::Command::new("remove"))
+        .subcommand(clap::Command::new("env").subcommand(clap::Command::new("use")));
+    let root = build_vp_spec(&mut raw, &test_vp_cfg(|| STORE_DIR.get().unwrap().clone()));
+
+    let remove_out = complete(
+        &root,
+        None,
+        &CompletionRequest::new(vec!["vp".into(), "remove".into(), "re".into()], 2, nested_dir),
+    );
+    assert!(remove_out.items.iter().any(|i| i.value == "react"));
+
+    // Node version sorting: v26.0.0-rc.10 > v26.0.0-rc.9, stable > prerelease
+    let node_out = complete(
+        &root,
+        None,
+        &CompletionRequest::new(
+            vec!["vp".into(), "env".into(), "use".into(), "v26".into()],
+            3,
+            ws.to_path_buf(),
+        ),
+    );
+    let vers: Vec<&str> = node_out.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(vers, vec!["v26.0.0", "v26.0.0-rc.10", "v26.0.0-rc.9"]);
+}
