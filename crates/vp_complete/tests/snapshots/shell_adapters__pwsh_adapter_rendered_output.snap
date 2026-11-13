@@ -1,0 +1,9 @@
+---
+source: crates/vp_complete/tests/shell_adapters.rs
+expression: pwsh_out
+---
+build:watch	build:watch	ParameterValue	Build and watch
+'my dir/'	my dir/	ProviderContainer	my dir/
+./-flag-file.ts	-flag-file.ts	ProviderItem	TypeScript file
+'special#target'	special#target	ParameterValue	Special target #1 with newline
+:2

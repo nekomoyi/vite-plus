@@ -1,0 +1,8 @@
+---
+source: crates/vp_complete/tests/shell_adapters.rs
+expression: fish_out
+---
+build:watch	Build and watch
+my dir/
+-flag-file.ts	TypeScript file
+special#target	Special target #1 with newline

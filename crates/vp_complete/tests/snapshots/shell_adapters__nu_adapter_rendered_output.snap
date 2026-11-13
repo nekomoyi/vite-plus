@@ -1,0 +1,5 @@
+---
+source: crates/vp_complete/tests/shell_adapters.rs
+expression: nu_out
+---
+[{"value":"build:watch","description":"Build and watch"},{"value":"\"my dir/\""},{"value":"-flag-file.ts","description":"TypeScript file"},{"value":"\"special#target\"","description":"Special target #1\nwith newline"}]

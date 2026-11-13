@@ -1,0 +1,9 @@
+---
+source: crates/vp_complete/tests/shell_adapters.rs
+expression: bash_out
+---
+watch
+my\ dir/
+-flag-file.ts
+special#target
+:2

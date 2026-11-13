@@ -1,0 +1,9 @@
+---
+source: crates/vp_complete/tests/shell_adapters.rs
+expression: zsh_out
+---
+V	build:watch	build:watch    -- Build and watch
+d	my\ dir	my dir/
+V	-flag-file.ts	-flag-file.ts  -- TypeScript file
+V	special#target	special#target -- Special target #1 with newline
+:2
