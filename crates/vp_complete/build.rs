@@ -51,7 +51,7 @@ fn main() {
     let out_dir_str = std::env::var("OUT_DIR").expect("OUT_DIR");
     let out_dir = Path::new(&out_dir_str);
 
-    let mut combined = String::with_capacity(32_768);
+    let mut combined = String::with_capacity(40_960);
     let mut meta = String::new();
 
     for &(const_name, rel) in HOOK_FILES {

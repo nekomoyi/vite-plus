@@ -8,7 +8,7 @@
 
 ## `cd home && VP_HOME=${workspace}/home nu assert_without_fish.nu`
 
-without fish on PATH, env.nu completers return null so Nushell 0.116 falls back to file completion (#3272)
+without fish on PATH, env.nu completers natively complete commands via vp_complete
 
 ```
 Nushell completer checks without fish passed
