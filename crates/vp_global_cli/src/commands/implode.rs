@@ -364,6 +364,8 @@ enum AffectedProfileKind {
         /// File content read during detection (reused for cleaning).
         content: Str,
         env_file: &'static str,
+        #[cfg(any(windows, test))]
+        ps_encoding: Option<(super::shell::PowerShellProfileEncoding, bool)>,
     },
 }
 
@@ -379,10 +381,22 @@ fn collect_affected_profiles(
         let path = resolve_profile_path(profile, user_home);
         let name = abbreviate_home_path(&path, user_home);
 
-        // Read directly — if the file doesn't exist, read_to_string returns Err
-        // which .ok().filter() handles gracefully (no redundant exists() check).
-        if let Some(content) = std::fs::read_to_string(&path).ok().filter(|c| {
-            c.lines().any(|line| source_matcher.is_vite_plus_source_line(line, profile.env_file))
+        #[cfg(any(windows, test))]
+        let read_result = if profile.env_file == "env.ps1" {
+            std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| super::shell::decode_powershell_profile(&bytes).ok())
+                .map(|d| (d.text, Some((d.encoding, d.had_bom))))
+        } else {
+            std::fs::read_to_string(&path).ok().map(|text| (text, None))
+        };
+        #[cfg(not(any(windows, test)))]
+        let read_result = std::fs::read_to_string(&path).ok().map(|text| (text, ()));
+
+        if let Some((content, _encoding_meta)) = read_result.filter(|pair| {
+            pair.0
+                .lines()
+                .any(|line| source_matcher.is_vite_plus_source_line(line, profile.env_file))
         }) {
             if matches!(profile.kind, ShellProfileKind::Snippet) {
                 affected.push(AffectedProfile { name, path, kind: AffectedProfileKind::Snippet });
@@ -394,6 +408,8 @@ fn collect_affected_profiles(
                 kind: AffectedProfileKind::Main {
                     content: Str::from(content),
                     env_file: profile.env_file,
+                    #[cfg(any(windows, test))]
+                    ps_encoding: _encoding_meta,
                 },
             });
         }
@@ -480,9 +496,23 @@ fn clean_affected_profiles(
 ) {
     for profile in affected_profiles {
         match &profile.kind {
-            AffectedProfileKind::Main { content, env_file } => {
+            AffectedProfileKind::Main {
+                content,
+                env_file,
+                #[cfg(any(windows, test))]
+                ps_encoding,
+            } => {
                 let cleaned = remove_vite_plus_lines(content, source_matcher, env_file);
-                match std::fs::write(&profile.path, cleaned.as_bytes()) {
+                #[cfg(any(windows, test))]
+                let bytes = match ps_encoding {
+                    Some((encoding, had_bom)) => super::shell::encode_powershell_profile_document(
+                        *encoding, *had_bom, &cleaned,
+                    ),
+                    None => cleaned.as_bytes().to_vec(),
+                };
+                #[cfg(not(any(windows, test)))]
+                let bytes = cleaned.as_bytes();
+                match std::fs::write(&profile.path, bytes) {
                     Ok(()) => output::success(&vt_str::format!("Cleaned {}", profile.name)),
                     Err(e) => {
                         output::warn(&vt_str::format!("Failed to clean {}: {e}", profile.name));
@@ -943,7 +973,7 @@ impl VitePlusSourceMatcher {
 
         // Windows profiles may spell the path with backslashes (e.g. Nushell's
         // `source '~\.vite-plus\env.nu'`); compare in forward-slash form.
-        let arg = normalize_path_separators(arg);
+        let arg = normalize_path_separators(&arg);
         self.roots.iter().any(|root| arg == join_path_ref(root, env_file))
     }
 }
@@ -957,19 +987,33 @@ fn normalize_path_separators(path: &str) -> Str {
     Str::from(path.replace('\\', "/"))
 }
 
-fn source_line_arg(line: &str) -> Option<&str> {
+fn source_line_arg(line: &str) -> Option<Str> {
     let rest = source_command_remainder(line)?.trim_start();
     if let Some(rest) = rest.strip_prefix('"') {
-        return rest.find('"').map(|end| &rest[..end]);
+        return rest.find('"').map(|end| Str::from(&rest[..end]));
     }
     if let Some(rest) = rest.strip_prefix('\'') {
-        return rest.find('\'').map(|end| &rest[..end]);
+        let mut out = String::new();
+        let mut chars = rest.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\'' {
+                if chars.peek() == Some(&'\'') {
+                    let _ = chars.next();
+                    out.push('\'');
+                } else {
+                    return Some(Str::from(out));
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        return None;
     }
-    rest.split_whitespace().next()
+    rest.split_whitespace().next().map(Str::from)
 }
 
 fn source_command_remainder(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
+    let trimmed = line.strip_prefix('\u{feff}').unwrap_or(line).trim_start();
     trimmed.strip_prefix(". ").or_else(|| trimmed.strip_prefix("source "))
 }
 
@@ -1187,13 +1231,57 @@ mod tests {
         let profiles = vec![AffectedProfile {
             name: Str::from(".zshrc"),
             path: profile_path.clone(),
-            kind: AffectedProfileKind::Main { content: Str::from(original), env_file: "env" },
+            kind: AffectedProfileKind::Main {
+                content: Str::from(original),
+                env_file: "env",
+                ps_encoding: None,
+            },
         }];
         clean_affected_profiles(&profiles, &matcher);
 
         let result = std::fs::read_to_string(&profile_path).unwrap();
         assert_eq!(result, "# my config\nexport FOO=bar\n");
         assert!(!result.contains(".vite-plus/env"));
+    }
+
+    #[test]
+    fn test_clean_affected_profiles_preserves_utf16_powershell() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_path = AbsolutePathBuf::new(temp_dir.path().to_path_buf()).unwrap();
+        let home_dir = temp_path.join(".vite-plus");
+        let matcher = VitePlusSourceMatcher::new(&home_dir, &temp_path);
+        let profile_path = temp_path.join("Microsoft.PowerShell_profile.ps1");
+        let env_ps1 = home_dir.join("env.ps1").to_string().replace('\'', "''");
+        let original_text =
+            format!("$env:KEEP = '1'\n# Vite+ bin (https://viteplus.dev)\n. '{env_ps1}'\n");
+        let raw_le = super::super::shell::encode_powershell_profile_document(
+            super::super::shell::PowerShellProfileEncoding::Utf16Le,
+            true,
+            &original_text,
+        );
+        std::fs::write(&profile_path, &raw_le).unwrap();
+
+        let decoded = super::super::shell::decode_powershell_profile(&raw_le).unwrap();
+        let profiles = vec![AffectedProfile {
+            name: Str::from("Microsoft.PowerShell_profile.ps1"),
+            path: profile_path.clone(),
+            kind: AffectedProfileKind::Main {
+                content: Str::from(decoded.text),
+                env_file: "env.ps1",
+                ps_encoding: Some((decoded.encoding, decoded.had_bom)),
+            },
+        }];
+        clean_affected_profiles(&profiles, &matcher);
+
+        let cleaned_bytes = std::fs::read(&profile_path).unwrap();
+        assert!(cleaned_bytes.starts_with(&[0xFF, 0xFE]), "Must preserve UTF-16LE BOM");
+        let cleaned_decoded =
+            super::super::shell::decode_powershell_profile(&cleaned_bytes).unwrap();
+        assert_eq!(
+            cleaned_decoded.encoding,
+            super::super::shell::PowerShellProfileEncoding::Utf16Le
+        );
+        assert_eq!(cleaned_decoded.text, "$env:KEEP = '1'\n");
     }
 
     #[test]
@@ -1901,5 +1989,15 @@ mod tests {
             assert!(!bin.join("node.exe").as_path().exists());
             assert!(!bin.join("node.shim").as_path().exists());
         });
+    }
+
+    #[test]
+    fn source_line_arg_unescapes_powershell_doubled_apostrophes() {
+        let user_home = AbsolutePathBuf::new(std::path::PathBuf::from("/Users/O'Brien")).unwrap();
+        let env_dir = user_home.join(".vite-plus");
+        let matcher = VitePlusSourceMatcher::new(&env_dir, &user_home);
+        assert!(
+            matcher.is_vite_plus_source_line(". '/Users/O''Brien/.vite-plus/env.ps1'", "env.ps1")
+        );
     }
 }
