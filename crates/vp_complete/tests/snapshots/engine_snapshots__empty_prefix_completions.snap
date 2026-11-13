@@ -1,0 +1,60 @@
+---
+source: crates/vp_complete/tests/engine_snapshots.rs
+expression: out_empty
+---
+CompletionOutput {
+    items: [
+        CompletionItem {
+            value: "run",
+            description: Some(
+                "Run a project script or task",
+            ),
+            kind: Subcommand,
+        },
+        CompletionItem {
+            value: "install",
+            description: Some(
+                "Install project dependencies (aliases: i, add)",
+            ),
+            kind: Subcommand,
+        },
+        CompletionItem {
+            value: "uninstall",
+            description: Some(
+                "Remove dependencies (aliases: unlink, un)",
+            ),
+            kind: Subcommand,
+        },
+        CompletionItem {
+            value: "remove",
+            description: Some(
+                "Remove a dependency",
+            ),
+            kind: Subcommand,
+        },
+        CompletionItem {
+            value: "env",
+            description: Some(
+                "Manage Vite+ environments",
+            ),
+            kind: Subcommand,
+        },
+        CompletionItem {
+            value: "upgrade",
+            description: Some(
+                "Upgrade Vite+",
+            ),
+            kind: Subcommand,
+        },
+        CompletionItem {
+            value: "implode",
+            description: Some(
+                "Uninstall Vite+ completely",
+            ),
+            kind: Subcommand,
+        },
+    ],
+    directive: CompletionDirective(
+        NO_FILE_COMP,
+    ),
+}

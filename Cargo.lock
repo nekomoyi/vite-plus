@@ -8452,6 +8452,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vp_complete"
+version = "0.0.0"
+dependencies = [
+ "bitflags 2.13.2",
+ "clap",
+ "flate2",
+ "insta",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "vp_error"
 version = "0.0.0"
 dependencies = [

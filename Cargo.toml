@@ -300,6 +300,7 @@ uuid = "1.27.0"
 vfs = "0.13.0"
 vp_command = { path = "crates/vp_command" }
 vp_cli_help = { path = "crates/vp_cli_help" }
+vp_complete = { path = "crates/vp_complete" }
 vp_error = { path = "crates/vp_error" }
 vp_js_runtime = { path = "crates/vp_js_runtime" }
 vp_migration = { path = "crates/vp_migration" }
@@ -456,6 +457,10 @@ panic = "abort" # Let it crash and force ourselves to write safe Rust.
 
 # The installer binary is downloaded by users, so optimize for size.
 [profile.release.package.vp_installer]
+opt-level = "z"
+
+# Shell completion runs only on interactive Tab presses, so optimize for size.
+[profile.release.package.vp_complete]
 opt-level = "z"
 
 # Oxc's compilation settings for native CI test binaries.

@@ -1,0 +1,32 @@
+---
+source: crates/vp_complete/tests/engine_snapshots.rs
+expression: out_un
+---
+CompletionOutput {
+    items: [
+        CompletionItem {
+            value: "uninstall",
+            description: Some(
+                "Remove dependencies",
+            ),
+            kind: Subcommand,
+        },
+        CompletionItem {
+            value: "unlink",
+            description: Some(
+                "Remove dependencies",
+            ),
+            kind: Subcommand,
+        },
+        CompletionItem {
+            value: "un",
+            description: Some(
+                "Remove dependencies",
+            ),
+            kind: Subcommand,
+        },
+    ],
+    directive: CompletionDirective(
+        NO_FILE_COMP,
+    ),
+}
