@@ -28,6 +28,10 @@ def any [] { }
 def which [] { }
 def is-empty [] { }
 def fish [] { }
+def "str ends-with" [] { }
+def last [] { }
+def "into string" [] { }
+def "from json" [] { }
 
 source env.nu
 

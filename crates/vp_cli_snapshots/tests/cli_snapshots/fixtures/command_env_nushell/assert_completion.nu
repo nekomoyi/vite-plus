@@ -26,7 +26,13 @@ for index in [0 1 2] {
   }
 }
 
-# `buffer` includes the earlier commands. Without the `vpr` translation, fish completes file names.
+for index in [3 4 5] {
+  let values = $completions | get $index | each {|value| $value | str trim }
+  if "build" not-in $values {
+    error make { msg: $"`($lines | get $index)` did not complete `build`, got: ($values)" }
+  }
+}
+
 for index in [4 5] {
   if ($completions | get $index) != ($completions | get 3) {
     error make { msg: $"`($lines | get $index)` completed differently from `vpr `, got: ($completions | get $index)" }

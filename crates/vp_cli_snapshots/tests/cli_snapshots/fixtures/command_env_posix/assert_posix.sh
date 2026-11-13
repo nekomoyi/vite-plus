@@ -98,7 +98,10 @@ if [ -n "${BASH_VERSION:-}" ]; then
         exit 1
     }
 elif [ -n "${ZSH_VERSION:-}" ]; then
-    whence -w _vpr_complete >/dev/null || {
+    whence -w _vp_complete >/dev/null && \
+        [ "${_comps[vp]:-}" = "_vp_complete" ] && \
+        [ "${_comps[vpr]:-}" = "_vp_complete" ] && \
+        [ "${_comps[vpx]:-}" = "_vp_complete" ] || {
         echo "env did not register Zsh completions"
         exit 1
     }

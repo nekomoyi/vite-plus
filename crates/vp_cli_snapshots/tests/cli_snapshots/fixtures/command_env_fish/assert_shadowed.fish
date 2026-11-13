@@ -47,11 +47,17 @@ if test "$VP_NODE_VERSION" != "22.23.4"
     exit 1
 end
 
-# The vp completion is out of scope: clap_complete registers it with bare `complete` and
-# `commandline`, so the user functions above replace it.
-set -l candidates (builtin complete -C "vpr b" | string split -f1 \t)
-if not builtin contains -- build $candidates
-    echo "vpr completion did not suggest build, got: $candidates"
+# Shell completion is hardened: vp_complete registers handlers with `builtin complete`
+# and calls `builtin commandline`, so shadowed user functions do not affect it.
+set -l vp_candidates (builtin complete -C "vp in" | string split -f1 \t)
+if not builtin contains -- install $vp_candidates
+    echo "vp completion did not suggest install, got: $vp_candidates"
+    exit 1
+end
+
+set -l vpr_candidates (builtin complete -C "vpr b" | string split -f1 \t)
+if not builtin contains -- build $vpr_candidates
+    echo "vpr completion did not suggest build, got: $vpr_candidates"
     exit 1
 end
 

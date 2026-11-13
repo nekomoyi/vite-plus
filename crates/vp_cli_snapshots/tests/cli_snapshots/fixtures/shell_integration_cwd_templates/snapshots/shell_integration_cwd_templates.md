@@ -96,40 +96,16 @@ vp() {
 
 # Dynamic shell completion for bash/zsh
 if [ -n "${BASH_VERSION-}" ] && type complete >/dev/null 2>&1; then
-    eval "$(VP_COMPLETE=bash command vp)"
-elif [ -n "${ZSH_VERSION-}" ] && type compdef >/dev/null 2>&1; then
-    eval "$(VP_COMPLETE=zsh command vp)"
-    eval '
-    _vpr_complete() {
-        local -a orig=("${words[@]}")
-        if [[ "${orig[2]-}" == "-C" ]]; then
-            if (( ${#orig[@]} >= 4 )); then
-                words=("vp" "-C" "${orig[3]}" "run" "${orig[@]:3}")
-                if (( CURRENT >= 4 )); then
-                    CURRENT=$((CURRENT + 1))
-                fi
-            else
-                words=("vp" "${orig[@]:1}")
+    eval "$(VP_COMPLETE=bash command vp 2>/dev/null)"
+elif [ -n "${ZSH_VERSION-}" ]; then
+    case $- in
+        *i*) eval "$(VP_COMPLETE=zsh command vp 2>/dev/null)" ;;
+        *)
+            if type compdef >/dev/null 2>&1; then
+                eval "$(VP_COMPLETE=zsh command vp 2>/dev/null)"
             fi
-        elif [[ "${orig[2]-}" == -C?* ]]; then
-            if (( ${#orig[@]} >= 3 )); then
-                words=("vp" "${orig[2]}" "run" "${orig[@]:2}")
-                if (( CURRENT >= 3 )); then
-                    CURRENT=$((CURRENT + 1))
-                fi
-            else
-                words=("vp" "${orig[@]:1}")
-            fi
-        else
-            words=("vp" "run" "${orig[@]:1}")
-            if (( CURRENT >= 2 )); then
-                CURRENT=$((CURRENT + 1))
-            fi
-        fi
-        ${=_comps[vp]}
-    }
-    compdef _vpr_complete vpr
-    '
+            ;;
+    esac
 fi
 ```
 
@@ -178,28 +154,7 @@ function vp
 end
 
 # Dynamic shell completion for fish
-VP_COMPLETE=fish command vp | builtin source
-
-function __vpr_complete
-    set -l tokens (builtin commandline --current-process --tokenize --cut-at-cursor)
-    set -l current (builtin commandline --current-token)
-    set -l args $tokens[2..]
-    set -l translated vp
-    if test (builtin count $args) -eq 0; and string match -qr '^-C' -- "$current"
-        # Keep completing the global -C option until its value is finished.
-    else if test (builtin count $args) -ge 1; and test "$args[1]" = "-C"
-        set -a translated -C
-        if test (builtin count $args) -ge 2
-            set -a translated "$args[2]" run $args[3..]
-        end
-    else if test (builtin count $args) -ge 1; and string match -qr '^-C.+' -- "$args[1]"
-        set -a translated "$args[1]" run $args[2..]
-    else
-        set -a translated run $args
-    end
-    VP_COMPLETE=fish command vp -- $translated $current
-end
-builtin complete -c vpr --keep-order --exclusive --arguments "(__vpr_complete)"
+VP_COMPLETE=fish command vp 2>/dev/null | builtin source
 ```
 
 ## `vpt print-file home/env.nu`
@@ -247,49 +202,31 @@ def --env --wrapped vp [...args: string@"nu-complete vp"] {
     }
 }
 
-# Shell completion for nushell (delegates to fish completions dynamically)
-# Nushell 0.116+ binds `buffer` and `place` by name: `buffer` is the whole line up to the cursor,
-# and `place.command` is the words of the current command up to the cursor. Older releases pass
-# the current command in `buffer` and the cursor position in `place`. See "Unified custom
-# completions" in https://www.nushell.sh/blog/2026-09-26-nushell_v0_116_0.html#unified-custom-completions
-# `place` is `any` because it is an int or a record. `oneof<int, record>` needs Nushell 0.105+,
-# and every Nushell release must parse the legacy env.nu.
-def "nu-complete vp current-command" [buffer: string, place: any] {
-    if (($place | %describe) starts-with "record") { $place.command | %str join ' ' } else { $buffer }
-}
-# Fish gets the command as an argument, so quotes in it cannot end a fish string.
-# Without fish, return null so Nushell falls back to file completion. Nushell 0.116+ shows no
-# suggestions when a parameter completer fails (#3272).
-def "nu-complete vp fish" [command: string] {
-    if (%which fish | %is-empty) { return null }
-    let fish_script = 'VP_COMPLETE=fish command vp | source; complete --do-complete=$argv[1]'
-    ^fish --command $fish_script $command | %from tsv --flexible --noheaders --no-infer | %rename value description | %update value {|row|
-        let value = $row.value
-        let need_quote = ['\' ',' '[' ']' '(' ')' ' ' '\t' "'" '"' "`"] | %any {$in in $value}
-        if ($need_quote and ($value | %path exists)) {
-            let expanded_path = if ($value starts-with ~) {$value | %path expand --no-symlink} else {$value}
-            $'"($expanded_path | %str replace --all "\"" "\\\"")"'
-        } else {$value}
-    }
-}
+# Shell completion for nushell
 def "nu-complete vp" [buffer: string, place: any] {
-    nu-complete vp fish (nu-complete vp current-command $buffer $place)
-}
-# Completion logic for vpr (translates context to 'vp run ...')
-def "nu-complete vpr" [buffer: string, place: any] {
-    let context = nu-complete vp current-command $buffer $place
-    let modified_context = if ($context =~ '^vpr(?<cwd>\s+-C\s+(?:"[^"]*"|\x27[^\x27]*\x27|\S+))\s') {
-        $context | %str replace -r '^vpr(?<cwd>\s+-C\s+(?:"[^"]*"|\x27[^\x27]*\x27|\S+))\s' 'vp$cwd run '
-    } else if ($context =~ '^vpr(?<cwd>\s+-C=?(?:"[^"]*"|\x27[^\x27]*\x27|\S+))\s') {
-        $context | %str replace -r '^vpr(?<cwd>\s+-C=?(?:"[^"]*"|\x27[^\x27]*\x27|\S+))\s' 'vp$cwd run '
-    } else if ($context =~ '^vpr\s+-C') {
-        $context | %str replace -r '^vpr' 'vp'
+    let exe = if $nu.os-info.name == "windows" { "vp.exe" } else { "vp" }
+    let preferred = ("<workspace>/home/bin" | %path expand --no-symlink | %path join $exe)
+    let vp_bin = if ($preferred | %path exists) and ((($preferred | %path expand) | %path type) == "file") {
+        $preferred
     } else {
-        $context | %str replace -r '^vpr' 'vp run'
+        let entries = ($env.PATH? | %default ($env.Path? | %default []))
+        let bins = ($entries | where { ($in =~ '^(/|[A-Za-z]:[\\/]|\\\\)') and ($in !~ '(?i)(^|[\\/])node_modules[\\/]\.bin([\\/]|$)') } | %each {|d| $d | %path join $exe } | where { ($in | %path exists) and ((($in | %path expand) | %path type) == "file") })
+        if ($bins | %is-empty) { "" } else { $bins.0 }
     }
-    nu-complete vp fish $modified_context
+    if (($place | %describe) starts-with "record") {
+        if ($vp_bin | %is-empty) { return { options: { sort: false, filter: false }, completions: [] } }
+        let spans = if (($buffer | %str ends-with ' ') or ($buffer | %str ends-with "\t")) and (($place.command | %is-empty) or (($place.command | %last) != "")) { $place.command | %append "" } else { $place.command }
+        let items = (%with-env { VP_COMPLETE: "nu", _VP_COMPLETE_INDEX: ((($spans | %length) - 1) | %into string) } { ^$vp_bin -- ...$spans | %from json })
+        { options: { sort: false, filter: false }, completions: $items }
+    } else if ($vp_bin | %is-empty) {
+        []
+    } else {
+        %with-env { VP_COMPLETE: "nu", COMP_LINE: $buffer, COMP_POINT: ($place | %into string) } { ^$vp_bin | %from json }
+    }
 }
-export extern "vpr" [...args: string@"nu-complete vpr"]
+def "nu-complete vpr" [buffer: string, place: any] { nu-complete vp $buffer $place }
+export extern "vpr" [...args: string@"nu-complete vp"]
+export extern "vpx" [...args: string@"nu-complete vp"]
 ```
 
 ## `vpt print-file home/env.ps1`
@@ -312,38 +249,20 @@ $env:PATH = @(
 Set-Alias vp (Join-Path $PSScriptRoot "vp.ps1")
 
 # Dynamic shell completion for PowerShell
-$env:VP_COMPLETE = "powershell"
-& (Join-Path $__vp_bin "vp") | Out-String | Invoke-Expression
-Remove-Item Env:\VP_COMPLETE -ErrorAction SilentlyContinue
-
-$__vpr_comp = {
-    param($wordToComplete, $commandAst, $cursorPosition)
-    $prev = $env:VP_COMPLETE
-    $env:VP_COMPLETE = "powershell"
-    $commandLine = $commandAst.Extent.Text
-    $args = $commandLine.Substring(0, [math]::Min($cursorPosition, $commandLine.Length))
-    if ($args -match '^(vpr\.exe|vpr)\b(\s+-C\s+(?:"[^"]*"|''[^'']*''|\S+))\s') {
-        $args = $args -replace '^(vpr\.exe|vpr)\b(\s+-C\s+(?:"[^"]*"|''[^'']*''|\S+))\s', 'vp$2 run '
-    } elseif ($args -match '^(vpr\.exe|vpr)\b(\s+-C=?(?:"[^"]*"|''[^'']*''|\S+))\s') {
-        $args = $args -replace '^(vpr\.exe|vpr)\b(\s+-C=?(?:"[^"]*"|''[^'']*''|\S+))\s', 'vp$2 run '
-    } elseif ($args -match '^(vpr\.exe|vpr)\b\s+-C') {
-        $args = $args -replace '^(vpr\.exe|vpr)\b', 'vp'
-    } else {
-        $args = $args -replace '^(vpr\.exe|vpr)\b', 'vp run'
+$__vp_exe = Join-Path $__vp_bin $(if ($env:OS -eq 'Windows_NT') { 'vp.exe' } else { 'vp' })
+if ([IO.File]::Exists($__vp_exe)) {
+    $__vp_prev_complete = $env:VP_COMPLETE
+    $__vp_prev_exit = $global:LASTEXITCODE
+    try {
+        $env:VP_COMPLETE = 'powershell'
+        (& $__vp_exe | Out-String) | Invoke-Expression
+    } finally {
+        $env:VP_COMPLETE = $__vp_prev_complete
+        $global:LASTEXITCODE = $__vp_prev_exit
     }
-    if ($wordToComplete -eq "") { $args += " ''" }
-    $results = Invoke-Expression @"
-& (Join-Path $__vp_bin 'vp') -- $args
-"@;
-    if ($prev) { $env:VP_COMPLETE = $prev } else { Remove-Item Env:\VP_COMPLETE }
-    $results | ForEach-Object {
-        $split = $_.Split("`t")
-        $cmd = $split[0];
-        if ($split.Length -eq 2) { $help = $split[1] } else { $help = $split[0] }
-        [System.Management.Automation.CompletionResult]::new($cmd, $cmd, 'ParameterValue', $help)
-    }
+    Remove-Variable __vp_prev_complete, __vp_prev_exit -ErrorAction SilentlyContinue
 }
-Register-ArgumentCompleter -Native -CommandName vpr -ScriptBlock $__vpr_comp
+Remove-Variable __vp_exe -ErrorAction SilentlyContinue
 ```
 
 ## `vpt print-file home/vp.ps1`
@@ -397,15 +316,15 @@ if ($__vp_command) {
 }
 $__vp_command_index = 0
 if ($args.Count -ge 1) {
-    if ($args[0] -eq "-C") {
+    if ($args[0] -ceq "-C") {
         $__vp_command_index = 2
-    } elseif ("$($args[0])" -like "-C?*") {
+    } elseif ("$($args[0])" -clike "-C?*") {
         $__vp_command_index = 1
     }
 }
 # Intercept `vp env use` to set/unset VP_NODE_VERSION in the current session.
-if ($args.Count -ge ($__vp_command_index + 2) -and $args[$__vp_command_index] -eq "env" -and $args[$__vp_command_index + 1] -eq "use") {
-    if ($args -contains "-h" -or $args -contains "--help") {
+if ($args.Count -ge ($__vp_command_index + 2) -and $args[$__vp_command_index] -ceq "env" -and $args[$__vp_command_index + 1] -ceq "use") {
+    if ($args -ccontains "-h" -or $args -ccontains "--help") {
         & (Join-Path $__vp_bin "vp") @args
         exit $LASTEXITCODE
     }

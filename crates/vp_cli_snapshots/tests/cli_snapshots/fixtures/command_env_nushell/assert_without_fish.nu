@@ -1,6 +1,6 @@
-# Nushell 0.116 shows no suggestions when a parameter completer fails. Without fish, the
-# completers must return null so that file completion answers instead (#3272).
-let lines = ["vp ", "vpr "]
+# Vite+ uses an in-tree completion engine (`vp_complete`), so completion does not
+# depend on Fish being installed.
+let lines = ["vp "]
 let path = $env.PATH | where { not ($in | path join fish | path exists) }
 let script = $"source env.nu
 ($lines | to nuon) | each {|line| $line | commandline complete } | to json --raw"
@@ -10,11 +10,12 @@ if $result.exit_code != 0 {
 }
 
 let completions = $result.stdout | from json
-for index in [0 1] {
-  let values = $completions | get $index
-  if "env.nu" not-in $values {
-    error make { msg: $"`($lines | get $index)` did not fall back to file completion without fish, got: ($values)" }
-  }
+let values = $completions | get 0 | each {|value| $value | str trim }
+if "env" not-in $values {
+  error make { msg: $"`vp ` did not complete `env` without fish, got: ($values)" }
+}
+if "install" not-in $values {
+  error make { msg: $"`vp ` did not complete `install` without fish, got: ($values)" }
 }
 
 print "Nushell completer checks without fish passed"
