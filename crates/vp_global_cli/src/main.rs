@@ -15,6 +15,7 @@
 mod cli;
 mod command_picker;
 mod commands;
+mod completion;
 mod error;
 mod help;
 mod homebrew;
@@ -30,7 +31,6 @@ use std::{
     process::{ExitCode, ExitStatus},
 };
 
-use clap_complete::env::CompleteEnv;
 use console::style;
 use vp_cli_help::error::{
     extract_invalid_subcommand_details, extract_unknown_argument, has_pass_as_value_suggestion,
@@ -40,7 +40,7 @@ use vp_shared::{exit_code_from_status, output};
 
 pub use crate::cli::try_parse_args_from;
 use crate::cli::{
-    RenderOptions, command_for_completion, raw_subcommand, run_command, run_command_with_options,
+    RenderOptions, raw_subcommand, run_command, run_command_with_options,
     try_parse_args_from_with_options,
 };
 
@@ -330,6 +330,10 @@ fn is_homebrew_recovery_command(args: &[String]) -> bool {
 }
 
 fn main() -> ExitCode {
+    if let Some(code) = completion::try_handle_completion_early() {
+        return code;
+    }
+
     let args: Vec<String> = std::env::args().collect();
 
     // Inspect shim mode without clearing its environment markers: Homebrew
@@ -423,28 +427,6 @@ async fn run() -> ExitCode {
             }
         }
     }
-
-    // Replace bash completion script to fix completion for items containing ':'
-    if env::var_os("VP_COMPLETE").is_some_and(|shell| shell == "bash") && args.len() == 1 {
-        vp_shared::output::print_stdout(format_args!(
-            "{}",
-            include_str!("../completion-register.bash")
-        ));
-        return ExitCode::SUCCESS;
-    }
-
-    // Handle shell completion
-    // `complete()` exits before the normal `-C` handling below runs, so apply
-    // the target directory here too: cwd-sensitive completers (run tasks)
-    // should suggest from <dir>, where the completed command will run.
-    if env::var_os("VP_COMPLETE").is_some()
-        && let Some((dir, _)) = parse_leading_chdir(&args[1..])
-        && let Ok(current) = vt_path::current_dir()
-    {
-        // Best-effort and silent: mid-typing values are often not (yet) dirs.
-        let _ = apply_chdir(&current, &dir);
-    }
-    CompleteEnv::with_factory(command_for_completion).var("VP_COMPLETE").complete();
 
     // Check for shim mode (invoked as node, npm, or npx)
     let argv0 = args.first().map(|s| s.as_str()).unwrap_or("vp");

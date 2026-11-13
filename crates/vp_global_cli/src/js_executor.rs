@@ -3,7 +3,7 @@
 //! This module handles downloading and caching Node.js via `vp_js_runtime`,
 //! and executing JavaScript scripts using the managed runtime.
 
-use std::process::{ExitStatus, Output};
+use std::process::ExitStatus;
 
 use tokio::process::Command;
 use vp_js_runtime::{
@@ -277,17 +277,6 @@ impl JsExecutor {
         self.run_js_entry(project_path, &node_binary, &bin_prefix, args).await
     }
 
-    pub async fn delegate_to_local_cli_output(
-        &mut self,
-        project_path: &AbsolutePath,
-        args: &[String],
-    ) -> Result<Output, Error> {
-        let runtime = self.ensure_project_runtime(project_path).await?;
-        let node_binary = runtime.get_binary_path();
-        let bin_prefix = runtime.get_bin_prefix();
-        self.run_js_entry_output(project_path, &node_binary, &bin_prefix, args).await
-    }
-
     /// Delegate `migrate`, escalating to the global CLI when the project's local
     /// `vite-plus` is older than this global `vp`. A stale local CLI predates the
     /// upgrade logic and would otherwise run (and leave the project unmigrated),
@@ -405,19 +394,6 @@ impl JsExecutor {
     ) -> Result<ExitStatus, Error> {
         let cmd = self.prepare_js_entry(project_path, node_binary, bin_prefix, args)?;
         Ok(vp_command::execute_with_terminal_guard(cmd).await?)
-    }
-
-    /// Like [`run_js_entry`], but returns `Output`.
-    async fn run_js_entry_output(
-        &self,
-        project_path: &AbsolutePath,
-        node_binary: &AbsolutePath,
-        bin_prefix: &AbsolutePath,
-        args: &[String],
-    ) -> Result<Output, Error> {
-        let mut cmd = self.prepare_js_entry(project_path, node_binary, bin_prefix, args)?;
-        let output = cmd.output().await?;
-        Ok(output)
     }
 
     /// Resolve the local vite-plus package root from the project directory.

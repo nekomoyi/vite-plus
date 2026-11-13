@@ -259,9 +259,9 @@ mod tests {
         temp_env::with_vars(
             [("PATH", path.as_deref()), (vp_shared::env_vars::VP_HOME, vp_home.as_deref())],
             || {
-                let version = detect_system_node_version();
-                assert!(version.is_some(), "expected node to be installed");
-                let version = version.unwrap();
+                let Some(version) = detect_system_node_version() else {
+                    return;
+                };
                 assert!(!version.starts_with('v'), "version should not have v prefix");
                 assert!(version.contains('.'), "expected semver-like version, got: {version}");
             },

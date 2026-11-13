@@ -3,13 +3,11 @@
 //! This module defines the CLI structure using clap and routes commands
 //! to their appropriate handlers.
 
-use std::{collections::HashSet, ffi::OsStr, process::ExitStatus};
+use std::{collections::HashSet, process::ExitStatus};
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use clap_complete::ArgValueCompleter;
 use console::style;
 use dialoguer::{Confirm, theme::ColorfulTheme};
-use tokio::runtime::Runtime;
 use vp_pm_cli::{ManagedGlobalCommand, PackageManagerCommand};
 use vp_shared::output;
 use vt_path::AbsolutePathBuf;
@@ -181,7 +179,7 @@ pub enum Commands {
     #[command(disable_help_flag = true)]
     Run {
         /// Additional arguments
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, add = ArgValueCompleter::new(run_tasks_completions))]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
 
@@ -601,68 +599,6 @@ fn should_suppress_header_for_subcommand(command: &str, args: &[String]) -> bool
         }
         _ => false,
     }
-}
-
-fn is_valid_task_name(name: &str) -> bool {
-    let script = name.split_once('#').map_or(name, |(_, s)| s);
-    !name.starts_with('#')
-        && !script.is_empty()
-        && !script.starts_with('#')
-        && !script.starts_with("//")
-        && !name.contains(char::is_whitespace)
-}
-
-pub(crate) fn sanitize_task_current_prefix(current: &OsStr) -> String {
-    current
-        .to_string_lossy()
-        .replace("\\#", "#")
-        .replace("\\:", ":")
-        .trim_matches(|c| c == '"' || c == '\'')
-        .to_string()
-}
-
-pub(crate) fn parse_task_completion_lines(
-    stdout: &str,
-    current: &str,
-) -> Vec<clap_complete::CompletionCandidate> {
-    stdout
-        .lines()
-        .filter_map(|line| line.split_once(": "))
-        .map(|(name, desc)| (name.trim(), desc.trim()))
-        .filter(|(name, _)| {
-            is_valid_task_name(name) && (current.is_empty() || name.starts_with(current))
-        })
-        .map(|(name, desc)| {
-            clap_complete::CompletionCandidate::new(name.to_string())
-                .help((!desc.is_empty()).then(|| desc.to_string().into()))
-        })
-        .collect()
-}
-
-/// Get available tasks for shell completion.
-///
-/// Delegates to the local vite-plus CLI to run `vp run` without arguments,
-/// which returns a list of available tasks in the format "task_name: description".
-fn run_tasks_completions(current: &OsStr) -> Vec<clap_complete::CompletionCandidate> {
-    let Ok(cwd) = vt_path::current_dir() else {
-        return vec![];
-    };
-
-    let current = sanitize_task_current_prefix(current);
-
-    let output = tokio::task::block_in_place(|| {
-        Runtime::new().ok().and_then(|rt| {
-            rt.block_on(async { commands::delegate::execute_output(cwd, "run", &[]).await.ok() })
-        })
-    });
-
-    output
-        .filter(|o| o.status.success())
-        .map(|output| {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            parse_task_completion_lines(&stdout, &current)
-        })
-        .unwrap_or_default()
 }
 
 /// Handle a parsed package-manager command.
@@ -1309,23 +1245,10 @@ fn maybe_print_runtime_header(command: &str, args: &[String], show_header: bool)
     print_runtime_header(show_header);
 }
 
-fn sanitize_subcommand_aliases_for_completion(cmd: &mut clap::Command) {
-    for subcmd in cmd.get_subcommands_mut() {
-        if subcmd.get_visible_aliases().next().is_some() {
-            let aliases: Vec<String> = subcmd.get_all_aliases().map(str::to_string).collect();
-            // Clear aliases and re-add them as hidden.
-            *subcmd = std::mem::take(subcmd).alias(None::<&str>).aliases(aliases);
-        }
-        sanitize_subcommand_aliases_for_completion(subcmd);
-    }
-}
-
-/// Build a completion command with hidden aliases so clap_complete's ID-based
-/// deduplication preserves canonical names.
-pub fn command_for_completion() -> clap::Command {
-    let mut cmd = Args::command();
-    sanitize_subcommand_aliases_for_completion(&mut cmd);
-    cmd
+/// Expose the raw clap Command for CLI parsing, help rendering, and completion CmdSpec.
+#[inline(never)]
+pub(crate) fn raw_cli_command() -> clap::Command {
+    Args::command()
 }
 
 /// Build a clap Command with custom help formatting matching the JS CLI output.
@@ -1335,7 +1258,7 @@ pub fn command_with_help() -> clap::Command {
 
 /// Build a clap Command with custom help formatting and rendering options.
 pub fn command_with_help_with_options(render_options: RenderOptions) -> clap::Command {
-    apply_custom_help(Args::command(), render_options)
+    apply_custom_help(raw_cli_command(), render_options)
 }
 
 /// Apply custom help formatting to a clap Command to match the JS CLI output.
@@ -1366,7 +1289,7 @@ pub fn try_parse_args_from_with_options(
     args: impl IntoIterator<Item = String>,
     render_options: RenderOptions,
 ) -> Result<Args, clap::error::Error> {
-    let cmd = apply_custom_help(Args::command(), render_options);
+    let cmd = apply_custom_help(raw_cli_command(), render_options);
     let matches = cmd.try_get_matches_from(args)?;
     Args::from_arg_matches(&matches).map_err(|e| e.into())
 }
@@ -1381,85 +1304,6 @@ mod tests {
 
     fn argv(args: &[&str]) -> Vec<String> {
         args.iter().map(|arg| (*arg).to_string()).collect()
-    }
-
-    #[test]
-    fn command_for_completion_preserves_canonical_subcommands() {
-        let mut cmd = super::command_for_completion();
-        for (parent, alias, name) in [
-            (None, "i", "install"),
-            (None, "up", "update"),
-            (None, "rm", "remove"),
-            (None, "un", "remove"),
-            (None, "uninstall", "remove"),
-            (Some("pm"), "ls", "list"),
-        ] {
-            let cmd = match parent {
-                Some(name) => cmd.find_subcommand_mut(name).unwrap(),
-                None => &mut cmd,
-            };
-            let candidates =
-                clap_complete::engine::complete(cmd, vec!["vp".into(), "".into()], 1, None)
-                    .unwrap();
-
-            assert!(
-                candidates.iter().any(|c| c.get_value() == name),
-                "missing {name}: {candidates:?}"
-            );
-            assert!(
-                !candidates.iter().any(|c| c.get_value() == alias),
-                "alias {alias} should be hidden from candidates: {candidates:?}"
-            );
-            assert_eq!(cmd.find_subcommand(alias).unwrap().get_name(), name);
-        }
-    }
-
-    #[test]
-    fn test_sanitize_task_current_prefix() {
-        use std::ffi::OsStr;
-        for (input, expected) in [
-            ("test\\:u", "test:u"),
-            ("pkg\\#test\\:u", "pkg#test:u"),
-            ("'test:unit'", "test:unit"),
-            ("\"pkg#build\"", "pkg#build"),
-        ] {
-            assert_eq!(super::sanitize_task_current_prefix(OsStr::new(input)), expected);
-        }
-    }
-
-    #[test]
-    fn test_parse_task_completion_lines() {
-        let stdout = concat!(
-            "  build: Run project build: vite build --mode:prod\n",
-            "  test:unit: Run unit tests\n",
-            "  pkg#test:unit: Workspace unit tests\n",
-            "  //: Root comment\n",
-            "  pkg#//: Workspace comment\n",
-            "  rolldown## Scrips for docs #: echo 1\n",
-            "# Global comment: echo 2\n",
-            "  invalid task with spaces: echo 3\n",
-            "  empty_desc: \n",
-        );
-
-        let complete = |cur| {
-            super::parse_task_completion_lines(stdout, cur)
-                .into_iter()
-                .map(|c| c.get_value().to_string_lossy().to_string())
-                .collect::<Vec<_>>()
-        };
-
-        // Comments and space-separated task names are filtered
-        assert_eq!(complete(""), vec!["build", "test:unit", "pkg#test:unit", "empty_desc"]);
-        assert_eq!(complete("test:"), vec!["test:unit"]);
-        assert!(complete("nonexistent").is_empty());
-
-        // Help descriptions: colons preserved and empty desc omitted
-        let all = super::parse_task_completion_lines(stdout, "");
-        assert_eq!(
-            all[0].get_help().map(|h| h.to_string()),
-            Some("Run project build: vite build --mode:prod".into())
-        );
-        assert_eq!(all[3].get_help(), None);
     }
 
     #[test]
