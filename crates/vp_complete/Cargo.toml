@@ -18,6 +18,10 @@ flate2 = { workspace = true }
 [build-dependencies]
 flate2 = { workspace = true }
 
+[[example]]
+name = "mock_vp"
+path = "examples/mock_vp.rs"
+
 [dev-dependencies]
 insta = { workspace = true }
 serde_json = { workspace = true }

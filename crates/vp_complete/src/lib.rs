@@ -10,11 +10,16 @@ pub(crate) mod assets;
 pub mod engine;
 pub mod lexer;
 pub mod path;
+pub mod shells;
 pub mod spec;
 
 pub use engine::{BinKind, classify_vp_binary, complete};
 pub use lexer::{BashLexResult, BashQuoteMode, parse_bash_line, parse_bash_line_with_wordbreaks};
 pub use path::{PathMode, complete_path};
+pub use shells::{
+    BashAdapter, FishAdapter, NuAdapter, ParseDialectError, PwshAdapter, ShellAdapter,
+    ShellDialect, ShellInputMode, ZshAdapter, handle_env_completion, try_handle_env_completion,
+};
 pub use spec::{
     CmdSpec, CompleterFn, CompletionContext, CompletionDirective, CompletionItem, CompletionOutput,
     CompletionRequest, FlagSpec, ItemKind, PathCompletion, PositionalSpec, ValueHint,

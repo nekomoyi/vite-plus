@@ -10,6 +10,14 @@ use std::{fmt::Write as fmt_write, fs, io::Write as io_write, path::Path};
 
 use flate2::{Compression, Decompress, FlushDecompress, write::DeflateEncoder};
 
+const HOOK_FILES: &[(&str, &str)] = &[
+    ("RANGE_BASH_HOOK", "src/shells/hooks/bash.sh"),
+    ("RANGE_ZSH_HOOK", "src/shells/hooks/zsh.zsh"),
+    ("RANGE_FISH_HOOK", "src/shells/hooks/fish.fish"),
+    ("RANGE_NU_HOOK", "src/shells/hooks/nu.nu"),
+    ("RANGE_PWSH_HOOK", "src/shells/hooks/pwsh.ps1"),
+];
+
 fn read_lf(manifest_dir: &Path, rel: &str) -> String {
     println!("cargo:rerun-if-changed={rel}");
     let path = manifest_dir.join(rel);
@@ -30,8 +38,14 @@ fn main() {
     let out_dir_str = std::env::var("OUT_DIR").expect("OUT_DIR");
     let out_dir = Path::new(&out_dir_str);
 
-    let mut combined = String::with_capacity(16_384);
+    let mut combined = String::with_capacity(24_576);
     let mut meta = String::new();
+
+    for &(const_name, rel) in HOOK_FILES {
+        let text = read_lf(manifest_dir, rel);
+        let (start, end) = push_slice(&mut combined, &text);
+        let _ = writeln!(meta, "pub(crate) const {const_name}: (usize, usize) = ({start}, {end});");
+    }
 
     let local_raw = read_lf(manifest_dir, "src/local_specs.tsv");
     let mut local_clean = String::with_capacity(local_raw.len());
