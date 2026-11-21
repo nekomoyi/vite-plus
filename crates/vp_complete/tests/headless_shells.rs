@@ -58,6 +58,18 @@ fn find_nu() -> Option<PathBuf> {
     find_bin("nu", &["/opt/homebrew/bin/nu", "/usr/local/bin/nu"])
 }
 
+fn find_pwsh() -> Option<PathBuf> {
+    find_bin(
+        "pwsh",
+        &[
+            "/opt/homebrew/opt/powershell/bin/pwsh",
+            "/opt/homebrew/bin/pwsh",
+            "/usr/local/opt/powershell/bin/pwsh",
+            "/usr/local/bin/pwsh",
+        ],
+    )
+}
+
 struct TestSandbox {
     _temp: TempDir,
     root: PathBuf,
@@ -117,6 +129,15 @@ impl TestSandbox {
     fn run_nu(&self, script: &str) -> Option<String> {
         let nu = find_nu()?;
         Some(self.run_cmd(&nu, &["-n", "-c", script], "nu"))
+    }
+
+    fn run_pwsh(&self, script: &str) -> Option<String> {
+        let pwsh = find_pwsh()?;
+        Some(self.run_cmd(
+            &pwsh,
+            &["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+            "pwsh",
+        ))
     }
 }
 
@@ -250,6 +271,41 @@ print $child.stdout
         stdout.contains("build:watch") && stdout.contains("build:*"),
         "Nu colon tasks: {stdout}"
     );
+}
+
+#[test]
+fn test_headless_pwsh() {
+    let sb = TestSandbox::new();
+    let hook_file = sb.write_hook(ShellDialect::PowerShell, "hook.ps1");
+
+    let script = format!(
+        r#"
+$ErrorActionPreference = 'Stop'
+$env:PATH = "{bin_dir}" + [IO.Path]::PathSeparator + $env:PATH
+. "{hook_file}"
+
+$global:LASTEXITCODE = 37
+$cUn = (TabExpansion2 'vp un').CompletionMatches.CompletionText -join ','
+$savedExit = $global:LASTEXITCODE
+$cEmpty = (TabExpansion2 '').CompletionMatches.Count
+$cColon = (TabExpansion2 'vp run build:').CompletionMatches.CompletionText -join ','
+$cPipe = (TabExpansion2 'vp run build | Select-Object -Fir').CompletionMatches.CompletionText -join ','
+$cSub = (TabExpansion2 'vp run $(Get-ChildItem -Lit').CompletionMatches.CompletionText -join ','
+$cNative = ([System.Management.Automation.CommandCompletion]::CompleteInput('vp un', 5, $null)).CompletionMatches.CompletionText -join ','
+
+Write-Output "UN=$cUn`nEXIT=$savedExit`nEMPTY=$cEmpty`nCOLON=$cColon`nPIPE=$cPipe`nSUB=$cSub`nNATIVE=$cNative"
+"#,
+        bin_dir = sb.bin_dir.display(),
+        hook_file = hook_file.display(),
+    );
+
+    let Some(stdout) = sb.run_pwsh(&script) else { return };
+    assert!(stdout.contains("uninstall") && stdout.contains("unlink"), "Pwsh aliases: {stdout}");
+    assert!(stdout.contains("EXIT=37"), "Pwsh must preserve LASTEXITCODE=37: {stdout}");
+    assert!(stdout.contains("build:watch") && stdout.contains("build:*"), "Pwsh colon: {stdout}");
+    assert!(stdout.contains("PIPE=-First"), "Pwsh must delegate piped completion: {stdout}");
+    assert!(stdout.contains("SUB=-LiteralPath"), "Pwsh must delegate $() subexpression: {stdout}");
+    assert!(stdout.contains("uninstall"), "Pwsh native completer must work: {stdout}");
 }
 
 #[cfg(unix)]

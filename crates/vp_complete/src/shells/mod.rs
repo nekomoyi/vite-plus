@@ -1,6 +1,7 @@
 pub mod bash;
 pub mod fish;
 pub mod nu;
+pub mod powershell;
 pub mod zsh;
 
 use std::{ffi::OsString, fmt, path::Path, str::FromStr};
@@ -8,6 +9,7 @@ use std::{ffi::OsString, fmt, path::Path, str::FromStr};
 pub use bash::BashAdapter;
 pub use fish::FishAdapter;
 pub use nu::NuAdapter;
+pub use powershell::PwshAdapter;
 pub use zsh::ZshAdapter;
 
 use crate::{
@@ -20,6 +22,7 @@ pub enum ShellDialect {
     Zsh,
     Fish,
     Nu,
+    PowerShell,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +45,7 @@ impl FromStr for ShellDialect {
             "zsh" => Ok(Self::Zsh),
             "fish" => Ok(Self::Fish),
             "nu" | "nushell" => Ok(Self::Nu),
+            "powershell" | "pwsh" => Ok(Self::PowerShell),
             _ => Err(ParseDialectError(s.to_string())),
         }
     }
@@ -54,6 +58,7 @@ impl fmt::Display for ShellDialect {
             Self::Zsh => "zsh",
             Self::Fish => "fish",
             Self::Nu => "nu",
+            Self::PowerShell => "powershell",
         })
     }
 }
@@ -92,6 +97,7 @@ impl ShellDialect {
             Self::Zsh => &ZshAdapter,
             Self::Fish => &FishAdapter,
             Self::Nu => &NuAdapter,
+            Self::PowerShell => &PwshAdapter,
         }
     }
 }
@@ -161,6 +167,22 @@ fn complete_fallback_paths(cwd: &Path, prefix: &str, literal: bool) -> Completio
             PathMode::Any,
             !literal,
         )
+    }
+}
+
+pub(crate) fn effective_cwd_fallback<'a>(
+    out: &'a CompletionOutput,
+    req: &CompletionRequest,
+    slot: &'a mut Option<CompletionOutput>,
+) -> &'a CompletionOutput {
+    if out.effective_cwd.is_some()
+        && out.items.is_empty()
+        && !out.directive.contains(CompletionDirective::NO_FILE_COMP)
+    {
+        let prefix = req.words.get(req.current_index).map_or("", String::as_str);
+        slot.insert(complete_fallback_paths(out.cwd_or(&req.cwd), prefix, req.literal_tilde))
+    } else {
+        out
     }
 }
 

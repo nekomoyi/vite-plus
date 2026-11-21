@@ -20,6 +20,9 @@ fn test_shell_dialect_parsing() {
     assert_eq!("fish".parse::<ShellDialect>().unwrap(), ShellDialect::Fish);
     assert_eq!("nu".parse::<ShellDialect>().unwrap(), ShellDialect::Nu);
     assert_eq!("nushell".parse::<ShellDialect>().unwrap(), ShellDialect::Nu);
+    assert_eq!("powershell".parse::<ShellDialect>().unwrap(), ShellDialect::PowerShell);
+    assert_eq!("pwsh".parse::<ShellDialect>().unwrap(), ShellDialect::PowerShell);
+    assert_eq!("PWSH".parse::<ShellDialect>().unwrap(), ShellDialect::PowerShell);
 
     assert!("unknown_shell".parse::<ShellDialect>().is_err());
 }
@@ -213,6 +216,46 @@ fn test_nu_adapter_json_output() {
 }
 
 #[test]
+fn test_pwsh_adapter_quoting_and_flags() {
+    let adapter = ShellDialect::PowerShell.adapter();
+    let req = CompletionRequest::new(
+        vec!["vp".into(), "test".into(), "".into()],
+        2,
+        PathBuf::from("/workspace"),
+    );
+    let env = |_k: &str| None;
+    let out = CompletionOutput::new(
+        vec![
+            CompletionItem::new("my file.txt", Some("file desc"), ItemKind::File),
+            CompletionItem::new("-strange-name.js", Some("flag like file"), ItemKind::File),
+            CompletionItem::new("special#char", Some("hash tag"), ItemKind::Value),
+        ],
+        CompletionDirective::NO_FILE_COMP,
+    );
+
+    let rendered = adapter.render_output(&req, &env, &out);
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert_eq!(lines.len(), 4, "3 items + 1 directive line");
+    assert!(lines[0].starts_with("'my file.txt'\t"));
+    assert!(
+        lines[1].starts_with(".\\-strange-name.js\t")
+            || lines[1].starts_with("./-strange-name.js\t"),
+        "Files starting with '-' must be prefixed with .\\ or ./: got '{}'",
+        lines[1]
+    );
+    assert!(lines[2].starts_with("'special#char'\t"), "# must trigger single quoting");
+    assert_eq!(lines[3], ":4", "NO_FILE_COMP is 4");
+
+    // Verify hook has zero Invoke-Expression
+    let hook = adapter.render_hook();
+    assert!(
+        !hook.contains("Invoke-Expression") && !hook.contains("iex "),
+        "Pwsh hook must never contain Invoke-Expression"
+    );
+    assert!(hook.contains("TabExpansion2"), "Pwsh hook must define TabExpansion2");
+}
+
+#[test]
 fn test_shell_adapter_snapshots() {
     let req = CompletionRequest::new(
         vec!["vp".into(), "run".into(), "build:wa".into()],
@@ -248,6 +291,9 @@ fn test_shell_adapter_snapshots() {
 
     let nu_out = ShellDialect::Nu.adapter().render_output(&req, &env, &out);
     insta::assert_snapshot!("nu_adapter_rendered_output", nu_out);
+
+    let pwsh_out = ShellDialect::PowerShell.adapter().render_output(&req, &env, &out);
+    insta::assert_snapshot!("pwsh_adapter_rendered_output", pwsh_out);
 }
 
 #[test]
@@ -302,6 +348,60 @@ fn test_nu_adapter_comp_line_fallback() {
             panic!("Expected Complete mode via COMP_LINE/COMP_POINT fallback");
         }
     }
+}
+
+#[test]
+fn test_pwsh_hook_script_input_set_ast_isolation_and_exit_code() {
+    let adapter = ShellDialect::PowerShell.adapter();
+    let hook = adapter.render_hook();
+
+    // 1. ScriptInputSet must forward through MapStringInputToParsedInput -> TabExpansion2 -ast
+    assert!(
+        hook.contains("MapStringInputToParsedInput"),
+        "ScriptInputSet must parse via MapStringInputToParsedInput and forward to AstInputSet"
+    );
+    assert!(
+        hook.contains("[AllowEmptyString()]"),
+        "ScriptInputSet $inputScript must allow empty strings"
+    );
+    assert!(
+        hook.contains("$inputScript.Length"),
+        "$cursorColumn must default to $inputScript.Length"
+    );
+
+    // 2. Innermost CommandAst selection + pipeline/separator boundary check
+    assert!(
+        hook.contains("FindAll(") && hook.contains("Select-Object -Last 1"),
+        "PowerShell hook must select innermost CommandAst via FindAll + Select-Object -Last 1"
+    );
+
+    // 3. Preserve $global:LASTEXITCODE across native completion invocation
+    assert!(
+        hook.contains("LASTEXITCODE"),
+        "PowerShell hook must save and restore $global:LASTEXITCODE"
+    );
+
+    // 4. Register-ArgumentCompleter -Native must actually invoke completion helper (not empty body)
+    let (_, after_reg) = hook
+        .split_once("Register-ArgumentCompleter")
+        .expect("Must contain Register-ArgumentCompleter");
+    assert!(
+        after_reg.contains("__vp_complete_ast"),
+        "Register-ArgumentCompleter -Native script block must invoke __vp_complete_ast, got: {after_reg}"
+    );
+
+    // 5. Empty/whitespace item value/tooltip must pad with single space ' ' to avoid PS 7.6 ArgumentNullException
+    let req = CompletionRequest::new(vec!["vp".into(), "".into()], 1, PathBuf::from("/workspace"));
+    let out = CompletionOutput::new(
+        vec![CompletionItem::new("", None::<String>, ItemKind::Value)],
+        CompletionDirective::NO_FILE_COMP,
+    );
+    let rendered = adapter.render_output(&req, &|_| None, &out);
+    let first_line = rendered.lines().next().unwrap();
+    let cols: Vec<&str> = first_line.split('\t').collect();
+    assert_eq!(cols.len(), 4);
+    assert!(!cols[1].is_empty(), "listItemText must never be empty");
+    assert!(!cols[3].is_empty(), "toolTip must never be empty");
 }
 
 #[test]
@@ -477,6 +577,38 @@ fn test_nu_apostrophe_and_tilde_space_quoting() {
 }
 
 #[test]
+fn test_pwsh_special_operator_quoting_and_extension_guard() {
+    let adapter = ShellDialect::PowerShell.adapter();
+    let req = CompletionRequest::new(vec!["vp".into(), "".into()], 1, PathBuf::from("/workspace"));
+    let out = CompletionOutput::new(
+        vec![
+            CompletionItem::value("ab`cd", None::<String>),
+            CompletionItem::value("a,b", None::<String>),
+            CompletionItem::value("@scope/pkg", None::<String>),
+            CompletionItem::value("arr[0]", None::<String>),
+            CompletionItem::value("a<b", None::<String>),
+            CompletionItem::value("a>b", None::<String>),
+        ],
+        CompletionDirective::DEFAULT,
+    );
+
+    let rendered = adapter.render_output(&req, &|_| None, &out);
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert!(lines[0].starts_with("'ab`cd'\t"), "got: {}", lines[0]);
+    assert!(lines[1].starts_with("'a,b'\t"), "got: {}", lines[1]);
+    assert!(lines[2].starts_with("'@scope/pkg'\t"), "got: {}", lines[2]);
+    assert!(lines[3].starts_with("'arr[0]'\t"), "got: {}", lines[3]);
+    assert!(lines[4].starts_with("'a<b'\t"), "got: {}", lines[4]);
+    assert!(lines[5].starts_with("'a>b'\t"), "got: {}", lines[5]);
+
+    let hook = adapter.render_hook();
+    assert!(
+        !hook.contains("GetFileNameWithoutExtension"),
+        "PowerShell hook must not strip arbitrary extensions like vp.txt"
+    );
+}
+
+#[test]
 fn test_bash_escapes_braces_and_bang_safely() {
     let adapter = ShellDialect::Bash.adapter();
     let out = CompletionOutput::new(
@@ -613,4 +745,231 @@ fn test_bash_quoted_attached_flag_value_trims_flag_prefix() {
         let lines: Vec<&str> = rendered.lines().collect();
         assert_eq!(lines[0], expected_rendered, "mismatch for {line:?}");
     }
+}
+
+#[test]
+fn test_powershell_preserves_attached_flag_prefixes_while_escaping_dash_paths() {
+    let adapter = ShellDialect::PowerShell.adapter();
+    let req = CompletionRequest::new(vec!["vp".into(), "-Cpro".into()], 1, PathBuf::from("/w"));
+
+    let mut attached_out = CompletionOutput::new(
+        vec![CompletionItem::directory("-Cproject/"), CompletionItem::directory("-C=project/")],
+        CompletionDirective::NO_SPACE | CompletionDirective::NO_FILE_COMP,
+    );
+    attached_out.path_completion = Some(vp_complete::PathCompletion {
+        mode: vp_complete::PathMode::DirsOnly,
+        flag_prefix: "-C".into(),
+    });
+    let rendered_attached = adapter.render_output(&req, &|_| None, &attached_out);
+    let attached_lines: Vec<&str> = rendered_attached.lines().collect();
+    assert!(attached_lines[0].starts_with("-Cproject/\t"));
+    assert!(attached_lines[1].starts_with("-C=project/\t"));
+
+    let mut standalone_out = CompletionOutput::new(
+        vec![CompletionItem::directory("-dashdir/")],
+        CompletionDirective::NO_SPACE | CompletionDirective::NO_FILE_COMP,
+    );
+    standalone_out.path_completion = Some(vp_complete::PathCompletion {
+        mode: vp_complete::PathMode::DirsOnly,
+        flag_prefix: String::new(),
+    });
+    let rendered_standalone = adapter.render_output(&req, &|_| None, &standalone_out);
+    assert!(rendered_standalone.starts_with("./-dashdir/\t"));
+}
+
+#[test]
+fn test_zsh_files_directive_and_effective_cwd_file_fallback() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let other_cwd = temp.path().join("other");
+    let sub_cwd = temp.path().join("packages/sub");
+    std::fs::create_dir_all(&other_cwd).unwrap();
+    std::fs::create_dir_all(&sub_cwd).unwrap();
+    std::fs::write(sub_cwd.join("target_file.mjs"), "export {};\n").unwrap();
+
+    // 1. Zsh PathCompletion renders native `__vp_files` directive with mode, prefix, extensions, and base dir
+    let mut path_out = CompletionOutput::new(
+        vec![CompletionItem::directory("-C=packages/")],
+        CompletionDirective::NO_SPACE | CompletionDirective::NO_FILE_COMP,
+    );
+    path_out.path_completion = Some(vp_complete::PathCompletion {
+        mode: vp_complete::PathMode::FilesWithExtensions(vec![".ts".into(), "mjs".into()]),
+        flag_prefix: "-C=".into(),
+    });
+    path_out.effective_cwd = Some(sub_cwd.clone());
+
+    let req = CompletionRequest::new(vec!["vp".into(), "-C=tar".into()], 1, other_cwd.clone());
+    let zsh_rendered = ShellDialect::Zsh.adapter().render_output(&req, &|_| None, &path_out);
+    assert!(
+        zsh_rendered.starts_with("__vp_files\nm:ext\np:-C=\nd:")
+            && zsh_rendered.contains("\ng:ts|mjs\n:6"),
+        "Unexpected Zsh __vp_files output: {zsh_rendered}"
+    );
+
+    // 2. Empty output without NO_FILE_COMP uses `effective_cwd` across all 5 shells
+    let mut fallback_out = CompletionOutput::new(vec![], CompletionDirective::DEFAULT);
+    fallback_out.effective_cwd = Some(sub_cwd.clone());
+    let fb_req = CompletionRequest::new(
+        vec![
+            "vp".into(),
+            "-C".into(),
+            "../packages/sub".into(),
+            "passthrough".into(),
+            "tar".into(),
+        ],
+        4,
+        other_cwd,
+    );
+    for dialect in
+        [ShellDialect::Bash, ShellDialect::Fish, ShellDialect::Nu, ShellDialect::PowerShell]
+    {
+        let rendered = dialect.adapter().render_output(&fb_req, &|_| None, &fallback_out);
+        assert!(
+            rendered.contains("target_file.mjs"),
+            "{dialect:?} fallback must resolve against effective_cwd, got: {rendered}"
+        );
+    }
+    let zsh_fb = ShellDialect::Zsh.adapter().render_output(&fb_req, &|_| None, &fallback_out);
+    assert!(
+        zsh_fb.starts_with("__vp_files\nm:any\nd:")
+            && zsh_fb.contains(sub_cwd.to_string_lossy().as_ref()),
+        "Zsh fallback with effective_cwd must emit __vp_files with d:<effective_cwd>, got: {zsh_fb}"
+    );
+}
+
+#[test]
+fn test_pwsh_raw_cur_unquoting() {
+    let cwd = PathBuf::from("/workspace");
+    let cases = [
+        ("'project''s dir/sub", "project's dir/sub"),
+        ("'closed''quote'", "closed'quote"),
+        ("\"double`\"quote", "double\"quote"),
+        ("\"closed`\"quote\"", "closed\"quote"),
+        (r#""a""b""#, r#"a"b"#),
+        (r#""a""b"#, r#"a"b"#),
+        ("backtick` space", "backtick space"),
+        ("--config=\"vite` config", "--config=vite config"),
+        ("-C='my ''dir''/sub", "-C=my 'dir'/sub"),
+    ];
+    for (raw, expected) in cases {
+        let argv = vec![
+            OsString::from("vp"),
+            OsString::from("--"),
+            OsString::from("vp"),
+            OsString::from(raw),
+        ];
+        let env = |k: &str| match k {
+            "_VP_COMPLETE_INDEX" => Some("1".into()),
+            "_VP_PWSH_RAW_CUR" => Some("1".into()),
+            _ => None,
+        };
+        let ShellInputMode::Complete(req) =
+            ShellDialect::PowerShell.adapter().parse_input(&env, &argv, &cwd)
+        else {
+            panic!("Expected Complete for {raw}");
+        };
+        assert_eq!(req.words[1], expected, "Failed unquoting {raw}");
+    }
+}
+
+#[test]
+fn test_fallback_attached_flag_and_delimiter_sanitization() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let ws = temp.path();
+    std::fs::write(ws.join("alpha.txt"), "a").unwrap();
+
+    // 1. File fallback strips and re-attaches `--unknown=prefix` in Fish/Nu (and PowerShell/Zsh when effective_cwd is set)
+    let fallback_out = CompletionOutput::new(vec![], CompletionDirective::DEFAULT);
+    let fb_req = CompletionRequest::new(
+        vec!["vp".into(), "passthrough".into(), "--unknown=alp".into()],
+        2,
+        ws.to_path_buf(),
+    );
+    for dialect in [ShellDialect::Fish, ShellDialect::Nu] {
+        let rendered = dialect.adapter().render_output(&fb_req, &|_| None, &fallback_out);
+        assert!(
+            rendered.contains("--unknown=alpha.txt"),
+            "{dialect:?} fallback must preserve `--unknown=`, got: {rendered}"
+        );
+    }
+    let mut cwd_fallback_out = CompletionOutput::new(vec![], CompletionDirective::DEFAULT);
+    cwd_fallback_out.effective_cwd = Some(ws.to_path_buf());
+    let pwsh_fb =
+        ShellDialect::PowerShell.adapter().render_output(&fb_req, &|_| None, &cwd_fallback_out);
+    assert!(
+        pwsh_fb.contains("--unknown=alpha.txt"),
+        "PowerShell effective_cwd fallback must preserve `--unknown=`, got: {pwsh_fb}"
+    );
+    let zsh_fb = ShellDialect::Zsh.adapter().render_output(&fb_req, &|_| None, &cwd_fallback_out);
+    assert!(
+        zsh_fb.contains("p:--unknown="),
+        "Zsh effective_cwd fallback must emit p:--unknown=, got: {zsh_fb}"
+    );
+
+    // 2. Line/tab protocol dialects drop items containing `\n`/`\t` rather than forging frames/directives
+    let poison_out = CompletionOutput::new(
+        vec![
+            CompletionItem::value("good", Some("ok")),
+            CompletionItem::value("bad\n:0", Some("injected")),
+            CompletionItem::value("bad\tcol", Some("tab")),
+        ],
+        CompletionDirective::NO_FILE_COMP,
+    );
+    let req = CompletionRequest::new(vec!["vp".into(), "".into()], 1, ws.to_path_buf());
+    for dialect in [ShellDialect::Bash, ShellDialect::Fish, ShellDialect::PowerShell] {
+        let rendered = dialect.adapter().render_output(&req, &|_| None, &poison_out);
+        assert!(rendered.contains("good"), "{dialect:?} must retain safe item: {rendered}");
+        assert!(
+            !rendered.contains("bad\n") && !rendered.contains("\n:0\n"),
+            "{dialect:?} must drop newline-breaking values: {rendered}"
+        );
+        if dialect != ShellDialect::Bash {
+            assert!(
+                !rendered.contains("injected") && !rendered.contains("bad"),
+                "{dialect:?} must drop tab/newline-breaking values: {rendered}"
+            );
+        }
+    }
+
+    // 3. PowerShell smart quotes must trigger quoting and double single-quote variants
+    let smart_out = CompletionOutput::new(
+        vec![
+            CompletionItem::value("x\u{2019}$(Write-Output INJECTED)\u{2018}y", Some("smart")),
+            CompletionItem::value("x\u{201C}$(Write-Output INJECTED)\u{201D}y", Some("dsmart")),
+        ],
+        CompletionDirective::NO_FILE_COMP,
+    );
+    let pwsh_smart = ShellDialect::PowerShell.adapter().render_output(&req, &|_| None, &smart_out);
+    assert!(
+        pwsh_smart.contains("'x\u{2019}\u{2019}$(Write-Output INJECTED)\u{2018}\u{2018}y'"),
+        "PowerShell must double Unicode single quotes: {pwsh_smart}"
+    );
+    assert!(
+        pwsh_smart.contains("'x\u{201C}$(Write-Output INJECTED)\u{201D}y'"),
+        "PowerShell must single-quote Unicode double quotes: {pwsh_smart}"
+    );
+
+    // 4. Nushell attached quoted flag values unquote cleanly and newlines are double-quoted + escaped
+    let nu_argv = vec![
+        OsString::from("vp"),
+        OsString::from("--"),
+        OsString::from("vp"),
+        OsString::from("--config=\"vit"),
+    ];
+    let nu_env = |k: &str| (k == "_VP_COMPLETE_INDEX").then(|| "1".into());
+    let ShellInputMode::Complete(nu_flag_req) =
+        ShellDialect::Nu.adapter().parse_input(&nu_env, &nu_argv, ws)
+    else {
+        panic!("Expected Nu Complete");
+    };
+    assert_eq!(nu_flag_req.words[1], "--config=vit");
+
+    let nu_nl_out = CompletionOutput::new(
+        vec![CompletionItem::value("abc\nwhoami", Some("nl"))],
+        CompletionDirective::NO_FILE_COMP,
+    );
+    let nu_rendered = ShellDialect::Nu.adapter().render_output(&req, &|_| None, &nu_nl_out);
+    assert!(
+        nu_rendered.contains(r#""\"abc\\nwhoami\"""#),
+        "Nushell must quote and escape newlines: {nu_rendered}"
+    );
 }
