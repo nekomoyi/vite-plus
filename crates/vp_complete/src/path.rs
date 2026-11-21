@@ -19,6 +19,29 @@ pub(crate) fn current_home_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+pub(crate) fn expand_tilde_item_with_home(val: &mut String, home: Option<&Path>) {
+    let Some(home_dir) = home else { return };
+    if val == "~" {
+        *val = home_dir.to_string_lossy().into_owned();
+        return;
+    }
+    let sep = if val.starts_with("~\\") {
+        '\\'
+    } else if val.starts_with("~/") {
+        '/'
+    } else {
+        return;
+    };
+    let rest = &val[2..];
+    let home_str = home_dir.to_string_lossy();
+    let base = home_str.trim_end_matches(['/', '\\']);
+    *val = format!("{base}{sep}{rest}");
+}
+
+pub(crate) fn expand_tilde_item(val: &mut String) {
+    expand_tilde_item_with_home(val, current_home_dir().as_deref());
+}
+
 pub fn complete_path(cwd: &Path, prefix: &str, mode: PathMode) -> CompletionOutput {
     complete_path_with_home(cwd, current_home_dir().as_deref(), prefix, mode)
 }

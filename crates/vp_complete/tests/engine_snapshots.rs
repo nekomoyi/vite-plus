@@ -4,10 +4,122 @@
     reason = "test suite uses standard test types and macros"
 )]
 
-use std::fs;
+use std::{fs, path::PathBuf};
 
 use tempfile::TempDir;
-use vp_complete::{CmdSpec, CompletionDirective, ItemKind, PathMode, ValueHint, complete_path};
+use vp_complete::{
+    CmdSpec, CompletionDirective, CompletionItem, CompletionOutput, CompletionRequest, FlagSpec,
+    ItemKind, PathMode, PositionalSpec, ValueHint, complete_path,
+};
+
+fn complete(root: &CmdSpec, req: &CompletionRequest) -> CompletionOutput {
+    vp_complete::complete(root, req, &|_, _, _| None)
+}
+
+fn create_sample_root_spec() -> CmdSpec {
+    CmdSpec::new("vp")
+        .about("Vite+ command line interface")
+        .flag(
+            FlagSpec::new()
+                .short('C')
+                .long("dir")
+                .about("Run as if vp was started in <dir>")
+                .takes_value(true)
+                .chdir(true)
+                .global(true)
+                .value_hint(ValueHint::DirPath),
+        )
+        .flag(
+            FlagSpec::new()
+                .long("log-level")
+                .about("Set logging level")
+                .takes_value(true)
+                .global(true)
+                .value_hint(ValueHint::StaticValues(vec![
+                    ("silent".into(), Some("No output".into())),
+                    ("info".into(), Some("Default output".into())),
+                    ("debug".into(), Some("Verbose debug output".into())),
+                ])),
+        )
+        .flag(FlagSpec::new().short('v').long("verbose").about("Enable verbose output"))
+        .subcommand(
+            CmdSpec::new("run")
+                .about("Run a project script or task")
+                .positional(PositionalSpec::new("script").about("Script name to execute")),
+        )
+        .subcommand(
+            CmdSpec::new("install")
+                .about("Install project dependencies")
+                .visible_aliases(vec!["i", "add"]),
+        )
+        .subcommand(
+            CmdSpec::new("uninstall")
+                .about("Remove dependencies")
+                .visible_aliases(vec!["unlink", "un"]),
+        )
+        .subcommand(CmdSpec::new("remove").about("Remove a dependency").hidden_alias("rm"))
+        .subcommand(CmdSpec::new("env").about("Manage Vite+ environments"))
+        .subcommand(CmdSpec::new("upgrade").about("Upgrade Vite+"))
+        .subcommand(CmdSpec::new("implode").about("Uninstall Vite+ completely"))
+}
+
+#[test]
+fn test_bimodal_subcommand_alias_matching() {
+    let root = create_sample_root_spec();
+    let cwd = PathBuf::from("/test");
+
+    // (1) Empty prefix lists visible canonical commands only, with alias hints
+    let req_empty = CompletionRequest::new(vec!["vp".into(), "".into()], 1, cwd.clone());
+    let out_empty = complete(&root, &req_empty);
+
+    let values: Vec<&str> = out_empty.items.iter().map(|it| it.value.as_str()).collect();
+    assert!(values.contains(&"run"), "run should be listed");
+    assert!(values.contains(&"install"), "install should be listed");
+    assert!(values.contains(&"uninstall"), "uninstall should be listed");
+    assert!(!values.contains(&"unlink"), "alias 'unlink' should NOT be listed with empty prefix");
+    assert!(!values.contains(&"un"), "alias 'un' should NOT be listed with empty prefix");
+    assert!(!values.contains(&"rm"), "hidden alias 'rm' should NOT be listed with empty prefix");
+
+    // Verify alias hint in description for uninstall
+    let uninst_item = out_empty.items.iter().find(|it| it.value == "uninstall").unwrap();
+    let desc = uninst_item.description.as_deref().unwrap_or("");
+    assert!(
+        desc.contains("aliases:") && desc.contains("unlink") && desc.contains("un"),
+        "Description should mention aliases: got '{desc}'"
+    );
+
+    // (2) Non-empty prefix "un" returns canonical name AND visible aliases as equal peers:
+    // "un", "uninstall", and "unlink" together!
+    let req_un = CompletionRequest::new(vec!["vp".into(), "un".into()], 1, cwd.clone());
+    let out_un = complete(&root, &req_un);
+    let values_un: Vec<&str> = out_un.items.iter().map(|it| it.value.as_str()).collect();
+    assert!(values_un.contains(&"un"), "visible alias 'un' should be suggested");
+    assert!(values_un.contains(&"uninstall"), "canonical 'uninstall' should be suggested");
+    assert!(values_un.contains(&"unlink"), "visible alias 'unlink' should be suggested");
+
+    // (3) Hidden alias matching when non-empty prefix matches
+    let req_rm = CompletionRequest::new(vec!["vp".into(), "rm".into()], 1, cwd.clone());
+    let out_rm = complete(&root, &req_rm);
+    let values_rm: Vec<&str> = out_rm.items.iter().map(|it| it.value.as_str()).collect();
+    assert!(values_rm.contains(&"rm"), "hidden alias 'rm' should be suggested when prefix matches");
+}
+
+#[test]
+fn test_chdir_flag_effective_cwd() {
+    let root = create_sample_root_spec();
+    let req = CompletionRequest::new(
+        vec!["vp".into(), "-C".into(), "subpkg".into(), "run".into(), "".into()],
+        4,
+        PathBuf::from("/workspace/root"),
+    );
+    let out = vp_complete::complete(&root, &req, &|_, _, ctx| {
+        Some(CompletionOutput::from_items(vec![CompletionItem::value(
+            ctx.cwd.display().to_string(),
+            None::<String>,
+        )]))
+    });
+    assert_eq!(out.items[0].value, req.cwd.join("subpkg").display().to_string());
+}
 
 #[test]
 fn test_path_provider() {
@@ -73,6 +185,46 @@ fn test_path_provider() {
 }
 
 #[test]
+fn test_flag_completion_and_deduplication() {
+    let root = create_sample_root_spec();
+    let cwd = PathBuf::from("/test");
+
+    // (1) Suggest flags when prefix starts with '-'
+    let req = CompletionRequest::new(vec!["vp".into(), "-".into()], 1, cwd.clone());
+    let out = complete(&root, &req);
+    let flags: Vec<&str> = out.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(flags.contains(&"--log-level"));
+    assert!(flags.contains(&"--verbose"));
+    assert!(flags.contains(&"-v"));
+
+    // (2) Flag deduplication: --verbose is non-multiple, once used it is omitted
+    let req_dedup =
+        CompletionRequest::new(vec!["vp".into(), "--verbose".into(), "-".into()], 2, cwd.clone());
+    let out_dedup = complete(&root, &req_dedup);
+    let dedup_flags: Vec<&str> = out_dedup.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(!dedup_flags.contains(&"--verbose"));
+    assert!(!dedup_flags.contains(&"-v"), "Short alias must also be omitted");
+
+    // (3) '--' barrier: after bare '--', tokens starting with '-' are treated as positionals
+    let req_barrier = CompletionRequest::new(
+        vec!["vp".into(), "run".into(), "--".into(), "-".into()],
+        3,
+        cwd.clone(),
+    );
+    let out_barrier = complete(&root, &req_barrier);
+    // After '--', positional completer of 'run' should be called, flags should NOT be suggested
+    let kinds: Vec<ItemKind> = out_barrier.items.iter().map(|i| i.kind).collect();
+    assert!(!kinds.contains(&ItemKind::Flag), "No flags suggested after '--'");
+
+    // (4) Inline flag value completion: --log-level=d<Tab> -> --log-level=debug
+    let req_inline =
+        CompletionRequest::new(vec!["vp".into(), "--log-level=d".into()], 1, cwd.clone());
+    let out_inline = complete(&root, &req_inline);
+    let inline_vals: Vec<&str> = out_inline.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(inline_vals.contains(&"--log-level=debug"));
+}
+
+#[test]
 fn test_clap_conversion() {
     let cmd = clap::Command::new("vp_test")
         .about("Test command")
@@ -121,6 +273,132 @@ fn test_clap_conversion() {
 }
 
 #[test]
+fn test_engine_snapshots() {
+    let root = create_sample_root_spec();
+    let cwd = PathBuf::from("/test");
+
+    // Empty prefix snapshot
+    let req_empty = CompletionRequest::new(vec!["vp".into(), "".into()], 1, cwd.clone());
+    let out_empty = complete(&root, &req_empty);
+    insta::assert_debug_snapshot!("empty_prefix_completions", out_empty);
+
+    // "un" prefix snapshot
+    let req_un = CompletionRequest::new(vec!["vp".into(), "un".into()], 1, cwd.clone());
+    let out_un = complete(&root, &req_un);
+    insta::assert_debug_snapshot!("un_prefix_completions", out_un);
+
+    // Flag suggestions snapshot
+    let req_flags = CompletionRequest::new(vec!["vp".into(), "-".into()], 1, cwd.clone());
+    let out_flags = complete(&root, &req_flags);
+    insta::assert_debug_snapshot!("flag_suggestions", out_flags);
+}
+
+#[test]
+fn test_file_path_empty_extensions_matches_all_files() {
+    let temp = TempDir::new().unwrap();
+    let root_dir = temp.path();
+    fs::write(root_dir.join(".env.local"), "A=1").unwrap();
+    fs::write(root_dir.join("notes.txt"), "hello").unwrap();
+    fs::create_dir(root_dir.join("configs")).unwrap();
+
+    // Direct complete_path with empty extensions vector
+    let out = complete_path(root_dir, "", PathMode::FilesWithExtensions(vec![]));
+    let vals: Vec<&str> = out.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        vals.contains(&"notes.txt"),
+        "Empty extensions must match regular files, got: {vals:?}"
+    );
+    assert!(
+        vals.contains(&"configs/"),
+        "Empty extensions must still include directories, got: {vals:?}"
+    );
+
+    // Also via clap::ValueHint::FilePath conversion
+    let cmd = clap::Command::new("vp")
+        .arg(clap::Arg::new("env-file").long("env-file").value_hint(clap::ValueHint::FilePath));
+    let spec = CmdSpec::from_clap(cmd);
+    let req = CompletionRequest::new(
+        vec!["vp".into(), "--env-file".into(), ".".into()],
+        2,
+        root_dir.to_path_buf(),
+    );
+    let flag_out = complete(&spec, &req);
+    let flag_vals: Vec<&str> = flag_out.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        flag_vals.contains(&".env.local"),
+        "clap::ValueHint::FilePath must complete .env.local, got: {flag_vals:?}"
+    );
+}
+
+#[test]
+fn test_chdir_respects_double_dash_and_chained_chdir() {
+    let temp = TempDir::new().unwrap();
+    let root_dir = temp.path();
+    fs::write(root_dir.join("file_in_root.txt"), "hi").unwrap();
+    fs::create_dir_all(root_dir.join("packages/app")).unwrap();
+
+    let spec =
+        CmdSpec::new("vp")
+            .flag(
+                FlagSpec::new()
+                    .short('C')
+                    .long("dir")
+                    .takes_value(true)
+                    .multiple(true)
+                    .chdir(true)
+                    .global(true)
+                    .value_hint(ValueHint::DirPath),
+            )
+            .subcommand(CmdSpec::new("run").positional(PositionalSpec::new("task")).positional(
+                PositionalSpec::new("args").multiple(true).value_hint(ValueHint::AnyPath),
+            ))
+            .subcommand(CmdSpec::new("env").flag(FlagSpec::new().long("env-only-flag")));
+
+    // 1. After `--`, `-C` is a passthrough arg, NOT vp's chdir flag (so files in root_dir must appear)
+    let req_after_dd = CompletionRequest::new(
+        vec!["vp".into(), "run".into(), "build".into(), "--".into(), "-C".into(), "".into()],
+        5,
+        root_dir.to_path_buf(),
+    );
+    let out_dd = complete(&spec, &req_after_dd);
+    let dd_vals: Vec<&str> = out_dd.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        dd_vals.contains(&"file_in_root.txt"),
+        "After '--', '-C <Tab>' must complete AnyPath positionals including files, got: {dd_vals:?}"
+    );
+
+    // 2. Chained `-C packages -C <Tab>` resolves relative to `packages/`
+    let req_chained = CompletionRequest::new(
+        vec!["vp".into(), "-C".into(), "packages".into(), "-C".into(), "".into()],
+        4,
+        root_dir.to_path_buf(),
+    );
+    let out_chained = complete(&spec, &req_chained);
+    let chained_vals: Vec<&str> = out_chained.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        chained_vals.contains(&"app/"),
+        "Chained '-C packages -C <Tab>' must resolve against effective_cwd, got: {chained_vals:?}"
+    );
+
+    // 3. Subcommand transition must NOT trigger at positional_index > 0
+    let mixed_spec = CmdSpec::new("vp")
+        .positional(PositionalSpec::new("first"))
+        .positional(PositionalSpec::new("second"))
+        .subcommand(CmdSpec::new("env").flag(FlagSpec::new().long("secret-env-flag")));
+    let req_pos1 = CompletionRequest::new(
+        vec!["vp".into(), "not_a_subcmd".into(), "env".into(), "-".into()],
+        3,
+        root_dir.to_path_buf(),
+    );
+    let out_pos1 = complete(&mixed_spec, &req_pos1);
+    let pos1_vals: Vec<&str> = out_pos1.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        !pos1_vals.contains(&"--secret-env-flag"),
+        "Token matching subcommand name at positional_index > 0 must not enter subcommand: {pos1_vals:?}"
+    );
+}
+
+#[test]
 fn test_tilde_path_completion() {
     let cwd_tmp = TempDir::new().unwrap();
     let home_tmp = TempDir::new().unwrap();
@@ -152,4 +430,211 @@ fn test_tilde_path_completion() {
     let out_slash_no_home =
         vp_complete::path::complete_path_with_home(cwd_tmp.path(), None, "~/", PathMode::Any);
     assert!(out_slash_no_home.items.is_empty());
+}
+
+#[test]
+fn test_clap_from_unbuilt_includes_generated_help_and_last_positionals() {
+    // Finding #10 & #8: Unbuilt Clap command must materialize -h/--help and `last = true` positionals
+    let temp = TempDir::new().unwrap();
+    fs::write(temp.path().join("filesystem_leak.txt"), "nope").unwrap();
+
+    let cmd = clap::Command::new("vp")
+        .subcommand(clap::Command::new("env").about("Manage env"))
+        .subcommand(
+            clap::Command::new("remove").arg(clap::Arg::new("packages").num_args(1..)).arg(
+                clap::Arg::new("passthrough")
+                    .num_args(0..)
+                    .last(true)
+                    .value_hint(clap::ValueHint::AnyPath),
+            ),
+        );
+
+    let mut spec = CmdSpec::from_clap(cmd);
+    let rm = spec.subcommands.iter_mut().find(|s| s.name == "remove").unwrap();
+    rm.positionals[0].value_hint =
+        ValueHint::StaticValues(vec![("react".into(), None), ("vitest".into(), None)]);
+
+    // 1. Root `vp --h` must complete `--help`
+    let out_root_help = complete(
+        &spec,
+        &CompletionRequest::new(vec!["vp".into(), "--h".into()], 1, temp.path().to_path_buf()),
+    );
+    let root_flags: Vec<&str> = out_root_help.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        root_flags.contains(&"--help"),
+        "Root must offer generated --help, got: {root_flags:?}"
+    );
+
+    // 2. Subcommand `vp env -` must offer `-h` and `--help`
+    let out_env_help = complete(
+        &spec,
+        &CompletionRequest::new(
+            vec!["vp".into(), "env".into(), "-".into()],
+            2,
+            temp.path().to_path_buf(),
+        ),
+    );
+    let env_flags: Vec<&str> = out_env_help.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(env_flags.contains(&"--help") && env_flags.contains(&"-h"), "got: {env_flags:?}");
+
+    // 3. Variadic positional `vp remove react <Tab>` BEFORE `--` must stay on `packages`, NOT leak to `last=true` passthrough!
+    let out_rm_second = complete(
+        &spec,
+        &CompletionRequest::new(
+            vec!["vp".into(), "remove".into(), "react".into(), "".into()],
+            3,
+            temp.path().to_path_buf(),
+        ),
+    );
+    let rm_vals: Vec<&str> = out_rm_second.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        rm_vals.contains(&"vitest") && !rm_vals.contains(&"filesystem_leak.txt"),
+        "Second package argument before '--' must stay on variadic packages positional, got: {rm_vals:?}"
+    );
+
+    // 4. After `--`, `vp remove react -- <Tab>` routes to `last=true` passthrough (`AnyPath`)
+    let out_rm_after_dd = complete(
+        &spec,
+        &CompletionRequest::new(
+            vec!["vp".into(), "remove".into(), "react".into(), "--".into(), "".into()],
+            4,
+            temp.path().to_path_buf(),
+        ),
+    );
+    let dd_vals: Vec<&str> = out_rm_after_dd.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        dd_vals.contains(&"filesystem_leak.txt"),
+        "After '--', completion must route to last=true passthrough positional, got: {dd_vals:?}"
+    );
+}
+
+#[test]
+fn short_option_clusters_consume_the_filter_value() {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir_all(temp.path().join("packages/subpkg")).unwrap();
+    let root = CmdSpec::new("vp").subcommand(
+        CmdSpec::new("run")
+            .flag(FlagSpec::new().short('r'))
+            .flag(
+                FlagSpec::new()
+                    .short('F')
+                    .takes_value(true)
+                    .multiple(true)
+                    .value_hint(ValueHint::StaticValues(vec![("@demo/subpkg".into(), None)])),
+            )
+            .positional(
+                PositionalSpec::new("task")
+                    .value_hint(ValueHint::StaticValues(vec![("task_in_subpkg".into(), None)])),
+            ),
+    );
+    // Finding #9a: Short-option cluster `-rF @demo/subpkg <Tab>` consumes `@demo/subpkg` as -F value!
+    let out_cluster = complete(
+        &root,
+        &CompletionRequest::new(
+            vec!["vp".into(), "run".into(), "-rF".into(), "@demo/subpkg".into(), "".into()],
+            4,
+            temp.path().join("packages/subpkg"),
+        ),
+    );
+    let cluster_vals: Vec<&str> = out_cluster.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(
+        cluster_vals,
+        vec!["task_in_subpkg"],
+        "-rF <pkg> <Tab> must consume <pkg> as -F value and complete tasks, got: {cluster_vals:?}"
+    );
+
+    // Finding #9b: Attached short-option value `-F@demo/` and clustered `-rF@demo/`
+    for attached in ["-F@demo/", "-rF@demo/"] {
+        let prefix_part = attached.strip_suffix("@demo/").unwrap();
+        let out_att = complete(
+            &root,
+            &CompletionRequest::new(
+                vec!["vp".into(), "run".into(), attached.into()],
+                2,
+                temp.path().to_path_buf(),
+            ),
+        );
+        let att_vals: Vec<&str> = out_att.items.iter().map(|i| i.value.as_str()).collect();
+        assert_eq!(
+            att_vals,
+            vec![format!("{prefix_part}@demo/subpkg")],
+            "Attached short option '{attached}' must complete value with prefix, got: {att_vals:?}"
+        );
+    }
+}
+
+#[test]
+fn test_word_zero_does_not_panic() {
+    let root = create_sample_root_spec();
+    let cwd = PathBuf::from("/workspace/root");
+
+    for words in [vec!["vp".to_string()], vec!["vp".to_string(), "uninstall".to_string()]] {
+        let out = complete(&root, &CompletionRequest::new(words, 0, cwd.clone()));
+        assert!(out.items.is_empty(), "Completing word 0 must not panic or emit subcommands");
+        assert_eq!(out.directive, CompletionDirective::DEFAULT);
+    }
+}
+
+#[test]
+fn test_dotdot_navigation_missing_dir_and_path_completion_metadata() {
+    let temp = TempDir::new().unwrap();
+    let ws = temp.path();
+    fs::create_dir_all(ws.join("packages/alpha")).unwrap();
+    fs::create_dir_all(ws.join("packages/beta")).unwrap();
+    fs::create_dir_all(ws.join("packages/.hidden_pkg")).unwrap();
+    fs::write(ws.join("packages/alpha/file.txt"), "x").unwrap();
+
+    let alpha_cwd = ws.join("packages/alpha");
+
+    // 1. `..` completes to `../` as Directory with NO_SPACE | NO_FILE_COMP
+    let out_dotdot = complete_path(&alpha_cwd, "..", PathMode::DirsOnly);
+    let dd_vals: Vec<&str> = out_dotdot.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(dd_vals, vec!["../"]);
+    assert!(out_dotdot.directive.contains(CompletionDirective::NO_SPACE));
+    assert!(out_dotdot.directive.contains(CompletionDirective::NO_FILE_COMP));
+
+    // 2. `.` completes `./`, `../`, and dot-directories in DirsOnly mode
+    let out_dot = complete_path(&ws.join("packages"), ".", PathMode::DirsOnly);
+    let dot_vals: Vec<&str> = out_dot.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(
+        dot_vals.contains(&"./") && dot_vals.contains(&"../") && dot_vals.contains(&".hidden_pkg/")
+    );
+
+    // 3. `../b` from `packages/alpha` resolves parent and completes `../beta/`
+    let out_parent = complete_path(&alpha_cwd, "../b", PathMode::DirsOnly);
+    let parent_vals: Vec<&str> = out_parent.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(parent_vals, vec!["../beta/"]);
+
+    // 4. Nonexistent parent dir must still set NO_FILE_COMP so DirsOnly never falls back to arbitrary files
+    let out_missing = complete_path(&alpha_cwd, "no_such_dir/x", PathMode::DirsOnly);
+    assert!(out_missing.items.is_empty());
+    assert!(out_missing.directive.contains(CompletionDirective::NO_FILE_COMP));
+
+    // 5. Attached/inline `-C=` and `-C` propagate PathCompletion.flag_prefix
+    let root = create_sample_root_spec();
+    let out_inline =
+        complete(&root, &CompletionRequest::new(vec!["vp".into(), "-C=../b".into()], 1, alpha_cwd));
+    assert_eq!(out_inline.items[0].value, "-C=../beta/");
+    let pc = out_inline.path_completion.expect("Must populate path_completion metadata");
+    assert_eq!(pc.flag_prefix, "-C=");
+    assert_eq!(pc.mode, PathMode::DirsOnly);
+}
+
+#[test]
+fn cursor_after_argv_starts_a_new_word() {
+    let root = create_sample_root_spec();
+    let request = |index| CompletionRequest::new(vec!["vp".into()], index, PathBuf::from("."));
+    assert!(complete(&root, &request(1)).items.iter().any(|item| item.value == "run"));
+    assert!(complete(&root, &request(2)).items.is_empty());
+}
+
+#[test]
+fn attached_chdir_accepts_directory_starting_with_dash() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir(dir.path().join("-tmp")).unwrap();
+    let root = create_sample_root_spec();
+    for (word, expected) in [("-C-t", "-C-tmp/"), ("-C=-t", "-C=-tmp/")] {
+        let request = CompletionRequest::new(vec!["vp".into(), word.into()], 1, dir.path().into());
+        assert!(complete(&root, &request).items.iter().any(|item| item.value == expected));
+    }
 }

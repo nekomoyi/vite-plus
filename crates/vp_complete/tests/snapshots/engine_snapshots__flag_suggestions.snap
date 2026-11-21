@@ -1,0 +1,46 @@
+---
+source: crates/vp_complete/tests/engine_snapshots.rs
+expression: out_flags
+---
+CompletionOutput {
+    items: [
+        CompletionItem {
+            value: "--dir",
+            description: Some(
+                "Run as if vp was started in <dir>",
+            ),
+            kind: Flag,
+        },
+        CompletionItem {
+            value: "-C",
+            description: Some(
+                "Run as if vp was started in <dir>",
+            ),
+            kind: Flag,
+        },
+        CompletionItem {
+            value: "--log-level",
+            description: Some(
+                "Set logging level",
+            ),
+            kind: Flag,
+        },
+        CompletionItem {
+            value: "--verbose",
+            description: Some(
+                "Enable verbose output",
+            ),
+            kind: Flag,
+        },
+        CompletionItem {
+            value: "-v",
+            description: Some(
+                "Enable verbose output",
+            ),
+            kind: Flag,
+        },
+    ],
+    directive: CompletionDirective(
+        NO_FILE_COMP,
+    ),
+}

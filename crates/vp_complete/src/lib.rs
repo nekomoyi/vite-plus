@@ -6,9 +6,11 @@
     reason = "completion adapters use standard library paths and strings for shell input"
 )]
 
+pub mod engine;
 pub mod path;
 pub mod spec;
 
+pub use engine::{Argument, ValueProvider, complete};
 pub use path::{PathMode, complete_path};
 pub use spec::{
     CmdSpec, CompletionContext, CompletionDirective, CompletionItem, CompletionOutput,
