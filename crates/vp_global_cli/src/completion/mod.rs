@@ -37,6 +37,10 @@ fn handle_completion_early_cold(dialect_var: &std::ffi::OsStr) -> Option<ExitCod
     }
 }
 
+fn global_bin_dir() -> PathBuf {
+    vp_shared::EnvConfig::get().dirs.bin.as_path().to_path_buf()
+}
+
 fn node_store_dir() -> PathBuf {
     vp_shared::EnvConfig::get().dirs.js_runtime().join("node").as_path().to_path_buf()
 }
@@ -46,9 +50,22 @@ fn complete_entry(request: &CompletionRequest) -> CompletionOutput {
     vp_complete::complete(&root, request, &|command, arg, ctx| {
         let name = command.name.as_str();
         let top_level = ctx.parent == Some("vp") || ctx.parent.is_none();
+        let pm_command = top_level || ctx.parent == Some("pm");
         let out = match arg {
+            Argument::Flag(flag)
+                if pm_command
+                    && (flag.short == Some('F')
+                        || flag.long.as_deref() == Some("resume-from")
+                        || (flag.long.as_deref() == Some("filter")
+                            && !matches!(name, "dev" | "build" | "preview"))) =>
+            {
+                providers::complete_workspace_pkgs(ctx)
+            }
             Argument::Positional(_) if top_level && name == "run" && ctx.positional_index == 0 => {
                 complete_task(ctx)
+            }
+            Argument::Positional(_) if top_level && name == "exec" && ctx.positional_index == 0 => {
+                providers::complete_bins(ctx)
             }
             Argument::Positional(_) if top_level && matches!(name, "run" | "exec") => {
                 ctx.complete_path(PathMode::Any)
@@ -62,6 +79,23 @@ fn complete_entry(request: &CompletionRequest) -> CompletionOutput {
                         .collect(),
                     CompletionDirective::NO_FILE_COMP,
                 )
+            }
+            Argument::Positional(_) if name == "vpx" && ctx.positional_index == 0 => {
+                providers::complete_vpx_target(ctx)
+            }
+            Argument::Positional(pos)
+                if ctx.parent == Some("env")
+                    && command.positionals.first() == Some(pos)
+                    && matches!(name, "use" | "pin" | "uninstall" | "default") =>
+            {
+                providers::complete_installed_nodes(ctx)
+            }
+            Argument::Positional(pos)
+                if pm_command
+                    && command.positionals.first() == Some(pos)
+                    && matches!(name, "remove" | "why" | "outdated" | "update") =>
+            {
+                providers::complete_manifest_deps(ctx)
             }
             _ => return None,
         };

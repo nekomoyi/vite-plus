@@ -119,6 +119,17 @@ fn fish_completions(
 }
 
 #[test]
+fn workspace_filter_respects_empty_member_list() {
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(dir.join("package.json"), r#"{"name":"root"}"#).unwrap();
+    std::fs::write(dir.join("pnpm-workspace.yaml"), "packages: []\n").unwrap();
+    std::fs::create_dir(dir.join("unlisted")).unwrap();
+    std::fs::write(dir.join("unlisted/package.json"), r#"{"name":"unlisted"}"#).unwrap();
+    assert_eq!(fish_completions(dir, &["run", "--filter", ""], &[]), ["root"]);
+}
+
+#[test]
 fn offline_tasks_use_exported_vite_config() {
     let temp = TempDir::new().unwrap();
     std::fs::write(temp.path().join("vite.config.ts"), "const unused = { run: { tasks: { ghost: 'no' } } }; export default { run: { tasks: { real: 'ok' } } }").unwrap();

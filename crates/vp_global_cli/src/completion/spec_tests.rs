@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use tempfile::TempDir;
-use vp_complete::CompletionRequest;
+use vp_complete::{CompletionDirective, CompletionRequest};
 
 use super::*;
 
@@ -18,6 +18,299 @@ fn assert_has_all(actual: &[String], expected: &[&str], context: &str) {
     for item in expected {
         assert!(actual.iter().any(|v| v == item), "{context} missing {item}: {actual:?}");
     }
+}
+
+#[test]
+fn test_vpx_no_chdir_and_target_completion() {
+    let temp_dir = TempDir::new().unwrap();
+    let cwd = temp_dir.path();
+
+    fs::write(cwd.join("script.ts"), "console.log('hi');").unwrap();
+    fs::create_dir_all(cwd.join("node_modules/.bin")).unwrap();
+    fs::write(cwd.join("node_modules/.bin/my-bin"), "").unwrap();
+
+    // 1. -C custom must not chdir to custom; completing ./scr should find script.ts in cwd
+    let vals = complete_values(&["vpx", "-C", "custom", "./scr"], cwd);
+    assert_has_all(&vals, &["./script.ts"], "vpx target completion with preceding -C");
+
+    // 2. Bare word target completion should merge binaries from node_modules/.bin and script files
+    let bare_vals = complete_values(&["vpx", "my"], cwd);
+    assert_has_all(&bare_vals, &["my-bin"], "vpx bare target completion");
+}
+
+#[test]
+fn test_pure_rust_dynamic_providers() {
+    let temp_home = TempDir::new().unwrap();
+    let temp_project = TempDir::new().unwrap();
+    let proj_dir = temp_project.path();
+
+    fs::write(
+        proj_dir.join("package.json"),
+        r#"{
+            "name": "test-pkg",
+            "dependencies": { "react": "^18.2.0" },
+            "devDependencies": { "typescript": "^5.0.0" }
+        }"#,
+    )
+    .unwrap();
+    fs::create_dir_all(proj_dir.join("node_modules/.bin")).unwrap();
+    fs::write(proj_dir.join("node_modules/.bin/eslint"), "").unwrap();
+
+    let node_store = temp_home.path().join("js_runtime/node");
+    fs::create_dir_all(node_store.join("v22.11.0")).unwrap();
+    fs::create_dir_all(node_store.join("v20.18.0")).unwrap();
+
+    let home_str = temp_home.path().to_str().unwrap();
+    temp_env::with_vars(
+        [
+            ("HOME", Some(home_str)),
+            ("USERPROFILE", Some(home_str)),
+            ("ZDOTDIR", Some(home_str)),
+            ("VP_HOME", Some(home_str)),
+        ],
+        || {
+            assert_has_all(
+                &complete_values(&["vp", "remove", ""], proj_dir),
+                &["react", "typescript"],
+                "vp remove",
+            );
+            assert_has_all(&complete_values(&["vp", "exec", ""], proj_dir), &["eslint"], "vp exec");
+            assert_has_all(
+                &complete_values(&["vp", "env", "use", ""], proj_dir),
+                &["v22.11.0", "v20.18.0"],
+                "vp env use",
+            );
+            for name in ["uninstall", "pin", "use", "default"] {
+                assert_has_all(
+                    &complete_values(&["vp", "env", name, "v20.18.0", "v22"], proj_dir),
+                    &["v22.11.0"],
+                    name,
+                );
+            }
+            assert_has_all(
+                &complete_values(&["vp", "env", "on", ""], proj_dir),
+                &["node", "pm"],
+                "vp env on",
+            );
+        },
+    );
+
+    let temp_ws = TempDir::new().unwrap();
+    let ws_dir = temp_ws.path();
+    fs::write(ws_dir.join("package.json"), r#"{"name": "root", "private": true}"#).unwrap();
+    fs::write(ws_dir.join("pnpm-workspace.yaml"), "packages:\n  - 'packages/*'\n").unwrap();
+    fs::create_dir_all(ws_dir.join("packages/pkg-a")).unwrap();
+    fs::write(ws_dir.join("packages/pkg-a/package.json"), r#"{"name": "@scope/pkg-a"}"#).unwrap();
+    fs::create_dir_all(ws_dir.join("packages/pkg-b")).unwrap();
+    fs::write(ws_dir.join("packages/pkg-b/package.json"), r#"{"name": "pkg-b"}"#).unwrap();
+
+    assert_has_all(
+        &complete_values(&["vp", "run", "--filter", ""], ws_dir),
+        &["@scope/pkg-a", "pkg-b"],
+        "vp run --filter",
+    );
+}
+
+#[test]
+fn test_vpx_target_completer_directory_directives() {
+    let temp = TempDir::new().unwrap();
+    let dir = temp.path();
+    fs::create_dir_all(dir.join("scripts")).unwrap();
+    fs::create_dir_all(dir.join("node_modules/.bin")).unwrap();
+    fs::write(dir.join("node_modules/.bin/semver"), "").unwrap();
+
+    // 1. Single directory match (`vpx scr`) must return BOTH NO_SPACE and NO_FILE_COMP
+    let req_single = CompletionRequest::new(vec!["vpx".into(), "scr".into()], 1, dir.to_path_buf());
+    let out_single = complete_entry(&req_single);
+    assert_eq!(out_single.items.len(), 1);
+    assert_eq!(out_single.items[0].value, "scripts/");
+    assert!(
+        out_single.directive.contains(CompletionDirective::NO_SPACE),
+        "Single dir match must have NO_SPACE"
+    );
+    assert!(
+        out_single.directive.contains(CompletionDirective::NO_FILE_COMP),
+        "Single dir match must preserve NO_FILE_COMP"
+    );
+
+    // 2. Mixed bin + directory match (`vpx s` -> `semver` + `scripts/`) must ALSO set NO_SPACE | NO_FILE_COMP
+    let req_mixed = CompletionRequest::new(vec!["vpx".into(), "s".into()], 1, dir.to_path_buf());
+    let out_mixed = complete_entry(&req_mixed);
+    let vals: Vec<&str> = out_mixed.items.iter().map(|i| i.value.as_str()).collect();
+    assert!(vals.contains(&"semver") && vals.contains(&"scripts/"), "got: {vals:?}");
+    assert!(
+        out_mixed.directive.contains(CompletionDirective::NO_SPACE),
+        "Mixed bin + dir match must include NO_SPACE so selecting 'scripts/' drills cleanly"
+    );
+    assert!(
+        out_mixed.directive.contains(CompletionDirective::NO_FILE_COMP),
+        "Mixed bin + dir match must include NO_FILE_COMP"
+    );
+}
+
+#[test]
+fn test_chdir_rules_regex_vite_config_and_workspace_discovery() {
+    let temp = TempDir::new().unwrap();
+    let root = temp.path();
+    fs::write(root.join("package.json"), r#"{"name":"root-ws","scripts":{"root-task":"echo 1"}}"#)
+        .unwrap();
+    fs::write(
+        root.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n  - '!packages/ignored'\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("packages/sub")).unwrap();
+    fs::write(
+        root.join("packages/sub/package.json"),
+        r#"{"name":"@ws/sub","scripts":{"sub-task":"echo 2"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("packages/sub/vite.config.ts"),
+        r#"
+import { defineConfig } from 'vite-plus';
+const routePattern = /^\/api\/v[0-9]{1,2}\/items["']?$/g;
+export default defineConfig({
+  run: {
+    tasks: {
+      "regex:safe": { command: "echo ok", description: "After regex literal" },
+    },
+  },
+});
+"#,
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("packages/ignored")).unwrap();
+    fs::write(root.join("packages/ignored/package.json"), r#"{"name":"@ws/ignored"}"#).unwrap();
+
+    // 1. Root `vp --` must NOT fabricate unsupported `--dir`
+    let root_long_flags = complete_values(&["vp", "--"], root);
+    assert!(
+        !root_long_flags.iter().any(|f| f == "--dir"),
+        "vp must not advertise nonexistent --dir flag: {root_long_flags:?}"
+    );
+    let root_short_flags = complete_values(&["vp", "-"], root);
+    assert!(root_short_flags.iter().any(|f| f == "-C"), "vp must advertise -C");
+
+    // 2. Pure-Rust task extraction + real `vp -C`, `vpr -C`, `vp run -C`, and `vpr -r -C` rules
+    temp_env::with_var("VP_COMPLETE_OFFLINE_ONLY_RUST", Some("1"), || {
+        let vp_c = complete_values(&["vp", "-C", "packages/sub", "run", ""], root);
+        assert_has_all(&vp_c, &["sub-task", "regex:safe"], "vp -C packages/sub run");
+
+        let vpr_c = complete_values(&["vpr", "-C", "packages/sub", ""], root);
+        assert_has_all(&vpr_c, &["sub-task", "regex:safe"], "vpr -C packages/sub");
+
+        // `vp run` does NOT accept `-C` after `run`: must stay in `root`, not chdir to `packages/sub`
+        let vp_run_c = complete_values(&["vp", "run", "-C", "packages/sub", ""], root);
+        assert!(
+            !vp_run_c.iter().any(|t| t == "sub-task"),
+            "vp run -C must not chdir after subcommand: {vp_run_c:?}"
+        );
+
+        // `vpr -r -C` has `-C` after position 1: must NOT chdir
+        let vpr_late_c = complete_values(&["vpr", "-r", "-C", "packages/sub", ""], root);
+        assert!(
+            !vpr_late_c.iter().any(|t| t == "sub-task"),
+            "vpr -r -C must not chdir past leading token: {vpr_late_c:?}"
+        );
+    });
+
+    // 3. Workspace discovery respects `!packages/ignored` negation
+    let ws_names = providers::workspace_package_names(root);
+    assert!(ws_names.iter().any(|n| n == "@ws/sub"), "Must include @ws/sub: {ws_names:?}");
+    assert!(
+        !ws_names.iter().any(|n| n == "@ws/ignored"),
+        "Must exclude !packages/ignored: {ws_names:?}"
+    );
+
+    // 4. npm/bun object-form workspaces with UTF-8 BOM
+    let npm_ws = TempDir::new().unwrap();
+    let mut bom_json = b"\xEF\xBB\xBF".to_vec();
+    bom_json.extend_from_slice(br#"{"name":"npm-root","workspaces":{"packages":["apps/*"]}}"#);
+    fs::write(npm_ws.path().join("package.json"), bom_json).unwrap();
+    fs::create_dir_all(npm_ws.path().join("apps/web")).unwrap();
+    fs::write(npm_ws.path().join("apps/web/package.json"), r#"{"name":"@app/web"}"#).unwrap();
+    let npm_names = providers::workspace_package_names(npm_ws.path());
+    assert!(
+        npm_names.contains(&"npm-root".to_string()) && npm_names.contains(&"@app/web".to_string())
+    );
+}
+
+#[test]
+fn test_local_help_filtering_and_offline_node_semver() {
+    let cwd = PathBuf::from("/workspace");
+    let local_help = complete_values(&["./node_modules/.bin/vp", "help", ""], &cwd);
+    assert!(local_help.contains(&"build".to_string()), "local help missing build: {local_help:?}");
+    for global_cmd in ["env", "upgrade", "implode", "node", "list", "rebuild"] {
+        assert!(
+            !local_help.iter().any(|c| c == global_cmd),
+            "local node_modules/.bin/vp help must hide {global_cmd}: {local_help:?}"
+        );
+    }
+
+    let temp_node = TempDir::new().unwrap();
+    let rel_bin = if cfg!(windows) { "node.exe" } else { "bin/node" };
+    for ver in ["v9.9.0", "v22.14.0", "v20.18.0", "v22.14.0-rc.9", "v22.14.0-rc.10"] {
+        let bin = temp_node.path().join("js_runtime/node").join(ver).join(rel_bin);
+        fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        fs::write(&bin, "").unwrap();
+    }
+    let resolved =
+        vp_shared::EnvConfig::with_vars([("VP_HOME", temp_node.path().as_os_str())], |_| {
+            assert_eq!(
+                complete_values(&["vp", "env", "use", "v22"], &cwd),
+                ["v22.14.0", "v22.14.0-rc.10", "v22.14.0-rc.9"]
+            );
+            resolve_offline_node()
+        })
+        .expect("must resolve node binary");
+    assert!(
+        resolved.to_string_lossy().contains("v22.14.0"),
+        "expected v22.14.0 over v9.9.0, got: {}",
+        resolved.display()
+    );
+}
+#[test]
+fn test_workspace_yaml_globs_and_ancestor_fallback() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let ws = temp.path();
+
+    // Unindented pnpm-workspace.yaml list + {apps,packages}/* + [ab] char class + negation
+    fs::write(
+        ws.join("pnpm-workspace.yaml"),
+        "packages:\n- '{apps,packages}/*'\n- 'tools/t[12]'\n- '!packages/ignored'\n",
+    )
+    .unwrap();
+    fs::create_dir_all(ws.join("apps/web/src/nested")).unwrap();
+    fs::create_dir_all(ws.join("packages/core")).unwrap();
+    fs::create_dir_all(ws.join("packages/ignored")).unwrap();
+    fs::create_dir_all(ws.join("tools/t1")).unwrap();
+    fs::create_dir_all(ws.join("tools/t9")).unwrap();
+
+    fs::write(
+        ws.join("apps/web/package.json"),
+        r#"{"name":"@demo/web","dependencies":{"react":"^19.0.0"},"scripts":{"web:dev":"vite"}}"#,
+    )
+    .unwrap();
+    fs::write(ws.join("packages/core/package.json"), r#"{"name":"@demo/core"}"#).unwrap();
+    fs::write(ws.join("packages/ignored/package.json"), r#"{"name":"@demo/ignored"}"#).unwrap();
+    fs::write(ws.join("tools/t1/package.json"), r#"{"name":"@demo/t1"}"#).unwrap();
+    fs::write(ws.join("tools/t9/package.json"), r#"{"name":"@demo/t9"}"#).unwrap();
+
+    let pkgs = providers::workspace_package_names(ws);
+    assert_eq!(pkgs, vec!["@demo/core", "@demo/t1", "@demo/web"]);
+
+    // Subdirectory `vp remove` and pure-Rust task fallback walk ancestors
+    let nested_dir = ws.join("apps/web/src/nested");
+    let tasks = tasks::extract_static_tasks(&nested_dir, "web:");
+    assert_eq!(tasks.iter().map(|t| t.value.as_str()).collect::<Vec<_>>(), vec!["web:dev"]);
+
+    let remove_out = complete_entry(&CompletionRequest::new(
+        vec!["vp".into(), "remove".into(), "re".into()],
+        2,
+        nested_dir,
+    ));
+    assert!(remove_out.items.iter().any(|i| i.value == "react"));
 }
 
 #[test]
