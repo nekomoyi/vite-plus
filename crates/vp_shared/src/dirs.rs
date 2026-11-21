@@ -124,6 +124,12 @@ impl VpDirs {
         self.data.join("fallback-bin")
     }
 
+    /// Installation and metadata cache for JavaScript runtimes.
+    #[must_use]
+    pub fn js_runtime(&self) -> AbsolutePathBuf {
+        self.data.join("js_runtime")
+    }
+
     /// JavaScript dependencies for a CLI whose executable is owned by Homebrew.
     #[must_use]
     pub fn cli_package(&self, version: &str, platform: &str) -> AbsolutePathBuf {

@@ -285,24 +285,20 @@ mod tests {
         assert_eq!(tool_spec_for_manifest(TOOL_SPECS[5], None).id, "oxlint-tsgolint");
     }
 
-    // The spawned `node` inherits this process's environment, so hold
-    // temp_env's lock with PATH/VP_HOME re-pinned to their current values:
-    // no concurrent with_vars scope can swap them mid-test and make a vp shim
-    // on PATH resolve incorrectly.
     #[test]
-    fn detect_system_node_version_returns_version() {
-        let path = std::env::var_os("PATH");
-        let vp_home = std::env::var_os(vp_shared::env_vars::VP_HOME);
-        temp_env::with_vars(
-            [("PATH", path.as_deref()), (vp_shared::env_vars::VP_HOME, vp_home.as_deref())],
-            || {
-                let version = detect_system_node_version();
-                assert!(version.is_some(), "expected node to be installed");
-                let version = version.unwrap();
-                assert!(!version.starts_with('v'), "version should not have v prefix");
-                assert!(version.contains('.'), "expected semver-like version, got: {version}");
-            },
-        );
+    fn system_node_version_respects_bypass() {
+        // Other tests replace PATH and VP_HOME. Acquire their lock before
+        // inspecting the environment inherited by the Node process.
+        temp_env::with_var(vp_shared::env_vars::VP_BYPASS, Some("1"), || {
+            let version = detect_system_node_version();
+            if crate::shim::find_system_tool("node").is_none() {
+                assert!(version.is_none());
+                return;
+            }
+            let version = version.expect("node --version must succeed");
+            assert!(!version.starts_with('v'), "version should not have v prefix");
+            assert!(version.contains('.'), "expected semver-like version, got: {version}");
+        });
     }
 
     #[cfg(unix)]

@@ -1631,7 +1631,7 @@ impl ExternalToolInputs {
 }
 
 /// Explicit bypass skips Vite+ installations and the directories listed by the caller.
-fn find_external_tool_in(tool: &str, cwd: &AbsolutePath) -> Option<AbsolutePathBuf> {
+pub(crate) fn find_external_tool_in(tool: &str, cwd: &AbsolutePath) -> Option<AbsolutePathBuf> {
     let inputs = ExternalToolInputs::from_process_env()?;
     vp_command::find_external_tool(tool, &inputs.query(), cwd)
 }

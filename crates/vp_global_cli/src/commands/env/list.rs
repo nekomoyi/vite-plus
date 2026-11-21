@@ -29,7 +29,7 @@ struct InstalledEnvironmentJson {
     package_managers: Option<BTreeMap<String, Vec<InstalledVersionJson>>>,
 }
 
-pub(super) fn list_installed_versions(directory: &std::path::Path) -> Vec<String> {
+pub(crate) fn list_installed_versions(directory: &std::path::Path) -> Vec<String> {
     let entries = match std::fs::read_dir(directory) {
         Ok(entries) => entries,
         Err(_) => return Vec::new(),
@@ -51,7 +51,7 @@ pub async fn execute(
     json: bool,
 ) -> Result<ExitStatus, Error> {
     let scope = EnvScope::parse(scope.as_deref())?;
-    let home = vp_shared::EnvConfig::get().dirs.data.clone();
+    let dirs = &vp_shared::EnvConfig::get().dirs;
     let config = config::load_config().await?;
     let current_node = if scope.includes_node() {
         config::resolve_version(&cwd).await.ok().map(|resolution| resolution.version)
@@ -87,7 +87,7 @@ pub async fn execute(
     }
 
     let node = scope.includes_node().then(|| {
-        list_installed_versions(home.join("js_runtime").join("node").as_path())
+        list_installed_versions(dirs.js_runtime().join("node").as_path())
             .into_iter()
             .map(|version| InstalledVersionJson {
                 current: current_node.as_deref() == Some(version.as_str()),
@@ -103,7 +103,7 @@ pub async fn execute(
             selected
                 .into_iter()
                 .map(|kind| {
-                    let versions = list_complete_package_manager_versions(&home, kind)
+                    let versions = list_complete_package_manager_versions(&dirs.data, kind)
                         .into_iter()
                         .map(|version| InstalledVersionJson {
                             current: current_pm.as_ref().is_some_and(|current| {

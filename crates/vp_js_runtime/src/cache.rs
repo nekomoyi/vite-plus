@@ -8,5 +8,5 @@ use crate::Error;
 ///
 /// Returns `<DATA>/js_runtime`.
 pub fn get_cache_dir() -> Result<AbsolutePathBuf, Error> {
-    Ok(vp_shared::EnvConfig::get().dirs.data.join("js_runtime"))
+    Ok(vp_shared::EnvConfig::get().dirs.js_runtime())
 }

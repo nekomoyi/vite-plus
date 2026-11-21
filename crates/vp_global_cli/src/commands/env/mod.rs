@@ -12,6 +12,7 @@ mod doctor;
 mod exec;
 mod lifecycle;
 mod list;
+pub(crate) use list::list_installed_versions;
 mod list_remote;
 mod off;
 mod on;

@@ -15,6 +15,7 @@
 mod cli;
 mod command_picker;
 mod commands;
+mod completion;
 mod error;
 mod help;
 mod homebrew;
