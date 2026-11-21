@@ -197,6 +197,18 @@ pub(crate) async fn execute_for_binary(
         cleanup_old_files(bin_dir).await;
     }
 
+    #[cfg(windows)]
+    if std::env::var(vp_shared::env_vars::VP_SELF_SETUP_NO_MODIFY_PATH).as_deref() != Ok("1") {
+        if let Err(err) = crate::commands::shell::powershell::configure_powershell_profiles(
+            &config,
+            None,
+            true,
+            |s| crate::self_setup::find_on_path(s).is_some(),
+        ) {
+            tracing::warn!("Failed to configure PowerShell profile: {}", err);
+        }
+    }
+
     // Print results
     if !created.is_empty() {
         output::raw(&help::render_heading("Created Shims"));

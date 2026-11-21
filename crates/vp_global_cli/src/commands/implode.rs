@@ -15,12 +15,14 @@ use vp_shared::output;
 use vt_path::AbsolutePathBuf;
 use vt_str::Str;
 
-use super::shell::profile_source::VitePlusSourceMatcher;
 use crate::{
     cli::exit_status,
     commands::{
         env::setup::shim_filename,
-        shell::{ALL_SHELL_PROFILES, ShellProfileKind, abbreviate_home_path, resolve_profile_path},
+        shell::{
+            ALL_SHELL_PROFILES, ShellProfileKind, abbreviate_home_path,
+            profile_source::VitePlusSourceMatcher, resolve_profile_path,
+        },
     },
     error::Error,
     install_dirs::{self, lexical_path},
@@ -365,6 +367,8 @@ enum AffectedProfileKind {
         /// File content read during detection (reused for cleaning).
         content: Str,
         env_file: &'static str,
+        #[cfg(any(windows, test))]
+        ps_encoding: Option<(super::shell::powershell::PowerShellProfileEncoding, bool)>,
     },
 }
 
@@ -380,10 +384,22 @@ fn collect_affected_profiles(
         let path = resolve_profile_path(profile, user_home);
         let name = abbreviate_home_path(&path, user_home);
 
-        // Read directly — if the file doesn't exist, read_to_string returns Err
-        // which .ok().filter() handles gracefully (no redundant exists() check).
-        if let Some(content) = std::fs::read_to_string(&path).ok().filter(|c| {
-            c.lines().any(|line| source_matcher.is_vite_plus_source_line(line, profile.env_file))
+        #[cfg(any(windows, test))]
+        let read_result = if profile.env_file == "env.ps1" {
+            std::fs::read(&path)
+                .ok()
+                .and_then(|bytes| super::shell::powershell::decode_powershell_profile(&bytes).ok())
+                .map(|d| (d.text, Some((d.encoding, d.had_bom))))
+        } else {
+            std::fs::read_to_string(&path).ok().map(|text| (text, None))
+        };
+        #[cfg(not(any(windows, test)))]
+        let read_result = std::fs::read_to_string(&path).ok().map(|text| (text, ()));
+
+        if let Some((content, _encoding_meta)) = read_result.filter(|pair| {
+            pair.0
+                .lines()
+                .any(|line| source_matcher.is_vite_plus_source_line(line, profile.env_file))
         }) {
             if matches!(profile.kind, ShellProfileKind::Snippet) {
                 affected.push(AffectedProfile { name, path, kind: AffectedProfileKind::Snippet });
@@ -395,6 +411,8 @@ fn collect_affected_profiles(
                 kind: AffectedProfileKind::Main {
                     content: Str::from(content),
                     env_file: profile.env_file,
+                    #[cfg(any(windows, test))]
+                    ps_encoding: _encoding_meta,
                 },
             });
         }
@@ -481,9 +499,25 @@ fn clean_affected_profiles(
 ) {
     for profile in affected_profiles {
         match &profile.kind {
-            AffectedProfileKind::Main { content, env_file } => {
+            AffectedProfileKind::Main {
+                content,
+                env_file,
+                #[cfg(any(windows, test))]
+                ps_encoding,
+            } => {
                 let cleaned = remove_vite_plus_lines(content, source_matcher, env_file);
-                match std::fs::write(&profile.path, cleaned.as_bytes()) {
+                #[cfg(any(windows, test))]
+                let bytes = match ps_encoding {
+                    Some((encoding, had_bom)) => {
+                        super::shell::powershell::encode_powershell_profile_document(
+                            *encoding, *had_bom, &cleaned,
+                        )
+                    }
+                    None => cleaned.as_bytes().to_vec(),
+                };
+                #[cfg(not(any(windows, test)))]
+                let bytes = cleaned.as_bytes();
+                match std::fs::write(&profile.path, bytes) {
                     Ok(()) => output::success(&vt_str::format!("Cleaned {}", profile.name)),
                     Err(e) => {
                         output::warn(&vt_str::format!("Failed to clean {}: {e}", profile.name));
@@ -1126,13 +1160,57 @@ mod tests {
         let profiles = vec![AffectedProfile {
             name: Str::from(".zshrc"),
             path: profile_path.clone(),
-            kind: AffectedProfileKind::Main { content: Str::from(original), env_file: "env" },
+            kind: AffectedProfileKind::Main {
+                content: Str::from(original),
+                env_file: "env",
+                ps_encoding: None,
+            },
         }];
         clean_affected_profiles(&profiles, &matcher);
 
         let result = std::fs::read_to_string(&profile_path).unwrap();
         assert_eq!(result, "# my config\nexport FOO=bar\n");
         assert!(!result.contains(".vite-plus/env"));
+    }
+
+    #[test]
+    fn test_clean_affected_profiles_preserves_utf16_powershell() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_path = AbsolutePathBuf::new(temp_dir.path().to_path_buf()).unwrap();
+        let home_dir = temp_path.join(".vite-plus");
+        let matcher = VitePlusSourceMatcher::new(&home_dir, &temp_path);
+        let profile_path = temp_path.join("Microsoft.PowerShell_profile.ps1");
+        let env_ps1 = home_dir.join("env.ps1").to_string().replace('\'', "''");
+        let original_text =
+            format!("$env:KEEP = '1'\r\n# Vite+ bin (https://viteplus.dev)\n. '{env_ps1}'\n");
+        let raw_le = super::super::shell::powershell::encode_powershell_profile_document(
+            super::super::shell::powershell::PowerShellProfileEncoding::Utf16Le,
+            true,
+            &original_text,
+        );
+        std::fs::write(&profile_path, &raw_le).unwrap();
+
+        let decoded = super::super::shell::powershell::decode_powershell_profile(&raw_le).unwrap();
+        let profiles = vec![AffectedProfile {
+            name: Str::from("Microsoft.PowerShell_profile.ps1"),
+            path: profile_path.clone(),
+            kind: AffectedProfileKind::Main {
+                content: Str::from(decoded.text),
+                env_file: "env.ps1",
+                ps_encoding: Some((decoded.encoding, decoded.had_bom)),
+            },
+        }];
+        clean_affected_profiles(&profiles, &matcher);
+
+        let cleaned_bytes = std::fs::read(&profile_path).unwrap();
+        assert!(cleaned_bytes.starts_with(&[0xFF, 0xFE]), "Must preserve UTF-16LE BOM");
+        let cleaned_decoded =
+            super::super::shell::powershell::decode_powershell_profile(&cleaned_bytes).unwrap();
+        assert_eq!(
+            cleaned_decoded.encoding,
+            super::super::shell::powershell::PowerShellProfileEncoding::Utf16Le
+        );
+        assert_eq!(cleaned_decoded.text, "$env:KEEP = '1'\r\n");
     }
 
     #[test]

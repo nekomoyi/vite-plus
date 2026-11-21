@@ -1,5 +1,7 @@
 //! Shared shell detection and profile helpers.
 
+#[cfg(any(windows, test))]
+pub(crate) mod powershell;
 pub(crate) mod profile_source;
 
 use std::str::FromStr;
@@ -26,8 +28,9 @@ pub enum Shell {
 impl FromStr for Shell {
     type Err = ();
 
+    #[cold]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
+        match s.to_ascii_lowercase().as_str() {
             "sh" | "bash" | "zsh" => Ok(Shell::Posix),
             "fish" => Ok(Shell::Fish),
             "nu" | "nushell" => Ok(Shell::NuShell),
@@ -142,6 +145,18 @@ pub const ALL_SHELL_PROFILES: &[ShellProfile] = &[
         env_file: "env.nu",
         kind: ShellProfileKind::Snippet,
     },
+    ShellProfile {
+        root: ShellProfileRoot::PowerShellDocuments,
+        path: "PowerShell/Microsoft.PowerShell_profile.ps1",
+        env_file: "env.ps1",
+        kind: ShellProfileKind::Main,
+    },
+    ShellProfile {
+        root: ShellProfileRoot::PowerShellDocuments,
+        path: "WindowsPowerShell/Microsoft.PowerShell_profile.ps1",
+        env_file: "env.ps1",
+        kind: ShellProfileKind::Main,
+    },
 ];
 
 /// IDE-relevant profile files that GUI-launched applications can see.
@@ -209,6 +224,8 @@ pub enum ShellProfileRoot {
     Fish,
     NushellConfig,
     NushellData,
+    #[cfg(any(windows, test))]
+    PowerShellDocuments,
 }
 
 #[derive(Clone, Copy)]
@@ -225,6 +242,8 @@ pub(crate) fn abbreviate_home_path(path: &AbsolutePath, user_home: &AbsolutePath
     }
 }
 
+#[cold]
+#[inline(never)]
 pub(crate) fn resolve_profile_path(
     profile: &ShellProfile,
     user_home: &AbsolutePathBuf,
@@ -246,6 +265,10 @@ pub(crate) fn resolve_profile_path(
             .and_then(|value| AbsolutePathBuf::new(value.into()))
             .or_else(|| AbsolutePathBuf::new(base_dirs?.data_dir().into()))
             .unwrap_or_else(|| user_home.join(".local/share")),
+        #[cfg(any(windows, test))]
+        ShellProfileRoot::PowerShellDocuments => {
+            powershell::resolve_powershell_documents_dir(None, user_home)
+        }
     };
     root.join(profile.path)
 }

@@ -508,7 +508,7 @@ fn interactive() -> bool {
     std::env::var_os("CI").is_none() && vp_shared::is_stderr_terminal()
 }
 
-fn find_on_path(name: &str) -> Option<AbsolutePathBuf> {
+pub(crate) fn find_on_path(name: &str) -> Option<AbsolutePathBuf> {
     let cwd = vt_path::current_dir().ok()?;
     vp_command::resolve_bin(name, None, &cwd).ok()
 }
