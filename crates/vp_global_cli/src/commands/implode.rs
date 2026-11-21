@@ -15,6 +15,7 @@ use vp_shared::output;
 use vt_path::AbsolutePathBuf;
 use vt_str::Str;
 
+use super::shell::profile_source::VitePlusSourceMatcher;
 use crate::{
     cli::exit_status,
     commands::{
@@ -904,89 +905,25 @@ fn spawn_deferred_shim_delete(paths: &DeferredShimPaths) -> std::io::Result<std:
         .spawn()
 }
 
-/// Matches shell-profile `source` lines that reference *this* install's env
-/// files, so a second Vite+ install's lines are left untouched.
-///
-/// The recognized spellings must mirror what the writers emit:
-/// `install.sh`/`install.ps1` (shell PATH setup) and `render_env_content` in
-/// `env/setup.rs`. `env/doctor.rs::check_profile_files` derives the same
-/// variants for its profile scan; keep them in sync.
-struct VitePlusSourceMatcher {
-    /// Env-dir spellings with forward-slash separators: the absolute path,
-    /// plus `$HOME`- and `~`-relative forms when the dir is under `$HOME`.
-    roots: Vec<Str>,
-}
-
-impl VitePlusSourceMatcher {
-    fn new(env_dir: &AbsolutePathBuf, user_home: &AbsolutePathBuf) -> Self {
-        let mut roots = vec![normalize_path_separators(&env_dir.as_path().display().to_string())];
-
-        if let Ok(Some(suffix)) = env_dir.strip_prefix(user_home) {
-            // `RelativePathBuf` guarantees forward-slash separators.
-            let suffix = vt_str::format!("{suffix}");
-            if suffix.is_empty() {
-                roots.push(Str::from("$HOME"));
-                roots.push(Str::from("~"));
-            } else {
-                roots.push(vt_str::format!("$HOME/{suffix}"));
-                roots.push(vt_str::format!("~/{suffix}"));
-            }
-        }
-
-        Self { roots }
-    }
-
-    fn is_vite_plus_source_line(&self, line: &str, env_file: &str) -> bool {
-        let Some(arg) = source_line_arg(line) else {
-            return false;
-        };
-
-        // Windows profiles may spell the path with backslashes (e.g. Nushell's
-        // `source '~\.vite-plus\env.nu'`); compare in forward-slash form.
-        let arg = normalize_path_separators(arg);
-        self.roots.iter().any(|root| arg == join_path_ref(root, env_file))
-    }
-}
-
-fn join_path_ref(root: &str, env_file: &str) -> Str {
-    let separator = if root.ends_with('/') { "" } else { "/" };
-    vt_str::format!("{root}{separator}{env_file}")
-}
-
-fn normalize_path_separators(path: &str) -> Str {
-    Str::from(path.replace('\\', "/"))
-}
-
-fn source_line_arg(line: &str) -> Option<&str> {
-    let rest = source_command_remainder(line)?.trim_start();
-    if let Some(rest) = rest.strip_prefix('"') {
-        return rest.find('"').map(|end| &rest[..end]);
-    }
-    if let Some(rest) = rest.strip_prefix('\'') {
-        return rest.find('\'').map(|end| &rest[..end]);
-    }
-    rest.split_whitespace().next()
-}
-
-fn source_command_remainder(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
-    trimmed.strip_prefix(". ").or_else(|| trimmed.strip_prefix("source "))
-}
-
 /// Remove Vite+ lines from content, returning the cleaned string.
 fn remove_vite_plus_lines(
     content: &str,
     source_matcher: &VitePlusSourceMatcher,
     env_file: &str,
 ) -> Str {
-    let lines: Vec<&str> = content.lines().collect();
+    let lines: Vec<&str> = content.split_inclusive('\n').collect();
     let mut remove_indices = Vec::new();
 
     for (i, line) in lines.iter().enumerate() {
         if source_matcher.is_vite_plus_source_line(line, env_file) {
             remove_indices.push(i);
             // Also remove the comment line above
-            if i > 0 && lines[i - 1].contains(VITE_PLUS_COMMENT) {
+            if i > 0
+                && matches!(
+                    lines[i - 1].trim(),
+                    VITE_PLUS_COMMENT | "# Vite+ bin (https://viteplus.dev)"
+                )
+            {
                 remove_indices.push(i - 1);
                 // Also remove the blank line before the comment
                 if i > 1 && lines[i - 2].trim().is_empty() {
@@ -1005,13 +942,15 @@ fn remove_vite_plus_lines(
     for (i, line) in lines.iter().enumerate() {
         if !remove_indices.contains(&i) {
             result.push_str(line);
-            result.push('\n');
         }
     }
 
     // Preserve trailing newline behavior of original
     if !content.ends_with('\n') && result.ends_with('\n') {
         result.pop();
+        if result.ends_with('\r') {
+            result.pop();
+        }
     }
 
     Str::from(result)
@@ -1059,7 +998,7 @@ mod tests {
     }
 
     fn shell_path(path: &AbsolutePathBuf) -> Str {
-        normalize_path_separators(&path.as_path().display().to_string())
+        Str::from(path.to_string().replace('\\', "/"))
     }
 
     fn default_source_matcher() -> VitePlusSourceMatcher {
@@ -1901,5 +1840,29 @@ mod tests {
             assert!(!bin.join("node.exe").as_path().exists());
             assert!(!bin.join("node.shim").as_path().exists());
         });
+    }
+
+    #[test]
+    fn profile_cleanup_preserves_user_lines_and_their_terminators() {
+        let matcher = default_source_matcher();
+        let kept = "export LABEL='# Vite+ bin'\r\n";
+        let content = format!("{kept}. \"$HOME/.vite-plus/env\"\r\n# tail\n");
+        assert_eq!(&*remove_vite_plus_lines(&content, &matcher, "env"), format!("{kept}# tail\n"));
+    }
+
+    #[test]
+    fn profile_cleanup_keeps_compound_commands_and_longer_paths() {
+        let matcher = default_source_matcher();
+        let content = ". \"$HOME/.vite-plus/env.ps1\"; Write-Output 'keep'\r\n. \"$HOME/.vite-plus/env.ps1\".bak\r\n";
+        assert_eq!(&*remove_vite_plus_lines(content, &matcher, "env.ps1"), content);
+    }
+
+    #[test]
+    fn source_line_arg_unescapes_powershell_doubled_apostrophes() {
+        let user_home = test_absolute_path("/Users/O'Brien", r"C:\Users\O'Brien");
+        let env_dir = user_home.join(".vite-plus");
+        let matcher = VitePlusSourceMatcher::new(&env_dir, &user_home);
+        let escaped_path = env_dir.join("env.ps1").to_string().replace('\'', "''");
+        assert!(matcher.is_vite_plus_source_line(&format!(". '{escaped_path}'"), "env.ps1"));
     }
 }

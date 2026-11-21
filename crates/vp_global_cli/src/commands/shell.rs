@@ -1,5 +1,7 @@
 //! Shared shell detection and profile helpers.
 
+pub(crate) mod profile_source;
+
 use std::str::FromStr;
 
 use directories::BaseDirs;
