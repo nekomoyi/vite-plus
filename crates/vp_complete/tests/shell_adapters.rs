@@ -15,6 +15,8 @@ use vp_complete::{
 fn test_shell_dialect_parsing() {
     assert_eq!("bash".parse::<ShellDialect>().unwrap(), ShellDialect::Bash);
     assert_eq!("BASH".parse::<ShellDialect>().unwrap(), ShellDialect::Bash);
+    assert_eq!("zsh".parse::<ShellDialect>().unwrap(), ShellDialect::Zsh);
+    assert_eq!("Zsh".parse::<ShellDialect>().unwrap(), ShellDialect::Zsh);
 
     assert!("unknown_shell".parse::<ShellDialect>().is_err());
 }
@@ -78,6 +80,84 @@ fn test_bash_adapter_space_escaping() {
 }
 
 #[test]
+fn test_zsh_adapter_colon_escaping_and_descriptions() {
+    let adapter = ShellDialect::Zsh.adapter();
+    let req = CompletionRequest::new(
+        vec!["vp".into(), "run".into(), "build:".into()],
+        2,
+        PathBuf::from("/workspace"),
+    );
+    let env = |_k: &str| None;
+    let out = CompletionOutput::new(
+        vec![
+            CompletionItem::value("@vitejs/monorepo#build", Some("Build\nand\twatch")),
+            CompletionItem::value("build:*", Some("All builds")),
+            CompletionItem::value("plain:task", None::<String>),
+        ],
+        CompletionDirective::KEEP_ORDER,
+    );
+
+    let rendered = adapter.render_output(&req, &env, &out);
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert_eq!(
+        lines[0], "V\t@vitejs/monorepo#build\t@vitejs/monorepo#build -- Build and watch",
+        "Colons, @, /, and mid-word # (without EXTENDED_GLOB) must remain unescaped for compadd -Q"
+    );
+    assert_eq!(
+        lines[1], "V\tbuild:\\*\tbuild:*                -- All builds",
+        "Wildcard * must be escaped in match while display stays clean and padded"
+    );
+    assert_eq!(lines[2], "v\tplain:task\tplain:task");
+    assert_eq!(lines[3], ":32", "KEEP_ORDER directive is 32");
+
+    // With caller EXTENDED_GLOB=on, mid-word `#` and `^` ARE escaped
+    let env_extglob = |k: &str| (k == "_VP_EXTGLOB").then(|| "on".into());
+    let rendered_eg = adapter.render_output(&req, &env_extglob, &out);
+    let eg_first = rendered_eg.lines().next().unwrap();
+    assert!(
+        eg_first.starts_with("V\t@vitejs/monorepo\\#build\t"),
+        "EXTENDED_GLOB=on must escape mid-word #: got {eg_first}"
+    );
+
+    // Inside open quotes (_VP_COMP_QUOTE="\""), matches are emitted raw so Zsh handles quote closing
+    let env_quoted = |k: &str| (k == "_VP_COMP_QUOTE").then(|| "\"".into());
+    let rendered_q = adapter.render_output(&req, &env_quoted, &out);
+    let q_lines: Vec<&str> = rendered_q.lines().collect();
+    assert!(
+        q_lines[1].starts_with("V\tbuild:*\t"),
+        "Inside quotes, Zsh match must not backslash-escape *: got {}",
+        q_lines[1]
+    );
+}
+
+#[test]
+fn test_zsh_adapter_parse_input_padding() {
+    let adapter = ShellDialect::Zsh.adapter();
+    let cwd = PathBuf::from("/workspace");
+    // Simulate `vp run <Tab>` where zsh passed words up to 2 without trailing empty string
+    let argv = vec![
+        OsString::from("vp"),
+        OsString::from("--"),
+        OsString::from("vp"),
+        OsString::from("run"),
+    ];
+    let env = |k: &str| match k {
+        "VP_COMPLETE" => Some("zsh".into()),
+        "_VP_COMPLETE_INDEX" => Some("2".into()),
+        _ => None,
+    };
+
+    match adapter.parse_input(&env, &argv, &cwd) {
+        ShellInputMode::Complete(req) => {
+            assert_eq!(req.words.len(), 3, "Must pad missing trailing word");
+            assert_eq!(req.words[2], "");
+            assert_eq!(req.current_index, 2);
+        }
+        ShellInputMode::RegistrationHook => panic!("Expected Complete mode"),
+    }
+}
+
+#[test]
 fn test_shell_adapter_snapshots() {
     let req = CompletionRequest::new(
         vec!["vp".into(), "run".into(), "build:wa".into()],
@@ -104,6 +184,9 @@ fn test_shell_adapter_snapshots() {
 
     let bash_out = ShellDialect::Bash.adapter().render_output(&req, &env, &out);
     insta::assert_snapshot!("bash_adapter_rendered_output", bash_out);
+
+    let zsh_out = ShellDialect::Zsh.adapter().render_output(&req, &env, &out);
+    insta::assert_snapshot!("zsh_adapter_rendered_output", zsh_out);
 }
 
 #[test]

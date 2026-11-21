@@ -74,6 +74,12 @@ impl TestSandbox {
         Self { _temp: temp, root, bin_dir }
     }
 
+    fn write_hook(&self, dialect: ShellDialect, filename: &str) -> PathBuf {
+        let path = self.root.join(filename);
+        fs::write(&path, dialect.adapter().render_hook()).unwrap();
+        path
+    }
+
     fn run_cmd(&self, program: &Path, args: &[&str], label: &str) -> String {
         let out = Command::new(program)
             .current_dir(&self.root)
@@ -130,6 +136,53 @@ _vp_complete; echo "RES3: ${{COMPREPLY[*]}}"
     assert!(
         stdout.contains("uninstall") && stdout.contains("unlink") && stdout.contains("un"),
         "Bash must return all 'un' aliases: {stdout}"
+    );
+}
+
+#[test]
+fn test_headless_zsh() {
+    let sb = TestSandbox::new();
+    let hook_file = sb.write_hook(ShellDialect::Zsh, "hook.zsh");
+    fs::write(
+        sb.root.join(".zshrc"),
+        "PROMPT='PROMPT> '\nzstyle ':completion:*' menu no\nsetopt LIST_TYPES\n",
+    )
+    .unwrap();
+
+    let script = format!(
+        r#"
+zmodload zsh/zpty || exit 0
+export ZDOTDIR="{temp_dir}"
+
+run_test() {{
+  local cmd="$1" expected="$2"
+  zpty pty /bin/zsh -di
+  zpty -r pty out "*PROMPT> *" || {{ zpty -d pty; return 1; }}
+  zpty -w pty "export PATH=\"{bin_dir}:\$PATH\"; rehash"
+  zpty -r pty out "*PROMPT> *" || {{ zpty -d pty; return 1; }}
+  zpty -w pty "source \"{hook_file}\""
+  zpty -r pty out "*PROMPT> *" || {{ zpty -d pty; return 1; }}
+  zpty -w pty "autoload -Uz compinit && compinit -D"
+  zpty -r pty out "*PROMPT> *" || {{ zpty -d pty; return 1; }}
+  zpty -w -n pty "$cmd"$'\t'$'\t'
+  zpty -r pty res "*$expected*" || {{ echo "TIMEOUT: $res"; zpty -d pty; return 1; }}
+  echo "RES: $res"
+  zpty -d pty
+}}
+
+run_test "vp un" "uninstall"
+run_test "vp run build:wa" "build:watch"
+"#,
+        temp_dir = sb.root.display(),
+        bin_dir = sb.bin_dir.display(),
+        hook_file = hook_file.display(),
+    );
+
+    let Some(stdout) = sb.run_zsh(&script) else { return };
+    assert!(stdout.contains("uninstall"), "Zsh must complete un aliases: {stdout}");
+    assert!(
+        stdout.contains("build:watch"),
+        "Zsh must complete build:watch without colon splitting: {stdout}"
     );
 }
 
