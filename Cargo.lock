@@ -8489,6 +8489,7 @@ dependencies = [
  "clap",
  "insta",
  "serde",
+ "serde_json",
  "tempfile",
 ]
 

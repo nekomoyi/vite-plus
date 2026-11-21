@@ -54,6 +54,10 @@ fn find_bin(name: &str, fallbacks: &[&str]) -> Option<PathBuf> {
     fallbacks.iter().map(Path::new).find(|p| p.exists()).map(Path::to_path_buf)
 }
 
+fn find_nu() -> Option<PathBuf> {
+    find_bin("nu", &["/opt/homebrew/bin/nu", "/usr/local/bin/nu"])
+}
+
 struct TestSandbox {
     _temp: TempDir,
     root: PathBuf,
@@ -108,6 +112,11 @@ impl TestSandbox {
     fn run_fish(&self, script: &str) -> Option<String> {
         let fish = find_bin("fish", &["/opt/homebrew/bin/fish", "/usr/local/bin/fish"])?;
         Some(self.run_cmd(&fish, &["-c", script], "fish"))
+    }
+
+    fn run_nu(&self, script: &str) -> Option<String> {
+        let nu = find_nu()?;
+        Some(self.run_cmd(&nu, &["-n", "-c", script], "nu"))
     }
 }
 
@@ -215,6 +224,31 @@ complete -C "vp run build:"
     assert!(
         stdout.contains("build:watch") && stdout.contains("build:*"),
         "Fish must complete build tasks: {stdout}"
+    );
+}
+
+#[test]
+fn test_headless_nu() {
+    let sb = TestSandbox::new();
+    let hook_file = sb.write_hook(ShellDialect::Nu, "hook.nu");
+
+    let script = format!(
+        r#"
+$env.PATH = ($env.PATH | prepend "{bin_dir}")
+let child = (^$nu.current-exe -n -c 'source "{hook_file}"; ["vp un", "ls | vp un", "vp run build:"] | each {{|line| $line | commandline complete }} | to json --raw' | complete)
+if $child.exit_code != 0 {{ error make {{ msg: $"nu completion failed: ($child.stderr)" }} }}
+if ($child.stderr | str contains "deprecated") {{ error make {{ msg: $"nu completion emitted deprecation warning: ($child.stderr)" }} }}
+print $child.stdout
+"#,
+        bin_dir = sb.bin_dir.display(),
+        hook_file = hook_file.display(),
+    );
+
+    let Some(stdout) = sb.run_nu(&script) else { return };
+    assert!(stdout.contains("uninstall") && stdout.contains("unlink"), "Nu aliases: {stdout}");
+    assert!(
+        stdout.contains("build:watch") && stdout.contains("build:*"),
+        "Nu colon tasks: {stdout}"
     );
 }
 

@@ -18,6 +18,8 @@ fn test_shell_dialect_parsing() {
     assert_eq!("zsh".parse::<ShellDialect>().unwrap(), ShellDialect::Zsh);
     assert_eq!("Zsh".parse::<ShellDialect>().unwrap(), ShellDialect::Zsh);
     assert_eq!("fish".parse::<ShellDialect>().unwrap(), ShellDialect::Fish);
+    assert_eq!("nu".parse::<ShellDialect>().unwrap(), ShellDialect::Nu);
+    assert_eq!("nushell".parse::<ShellDialect>().unwrap(), ShellDialect::Nu);
 
     assert!("unknown_shell".parse::<ShellDialect>().is_err());
 }
@@ -183,6 +185,34 @@ fn test_fish_adapter_tsv_output() {
 }
 
 #[test]
+fn test_nu_adapter_json_output() {
+    let adapter = ShellDialect::Nu.adapter();
+    let req = CompletionRequest::new(
+        vec!["vp".into(), "run".into(), "".into()],
+        2,
+        PathBuf::from("/workspace"),
+    );
+    let env = |_k: &str| None;
+    let out = CompletionOutput::new(
+        vec![
+            CompletionItem::value("build", Some("Build project")),
+            CompletionItem::directory("my dir/"),
+        ],
+        CompletionDirective::DEFAULT,
+    );
+
+    let rendered = adapter.render_output(&req, &env, &out);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&rendered).expect("Nu adapter must output valid JSON");
+    let arr = parsed.as_array().expect("Must be JSON array");
+    assert_eq!(arr.len(), 2);
+    assert_eq!(arr[0]["value"], "build");
+    assert_eq!(arr[0]["description"], "Build project");
+    assert_eq!(arr[1]["value"], "\"my dir/\"");
+    assert!(arr[1].get("description").is_none(), "None description must be omitted in JSON");
+}
+
+#[test]
 fn test_shell_adapter_snapshots() {
     let req = CompletionRequest::new(
         vec!["vp".into(), "run".into(), "build:wa".into()],
@@ -215,6 +245,9 @@ fn test_shell_adapter_snapshots() {
 
     let fish_out = ShellDialect::Fish.adapter().render_output(&req, &env, &out);
     insta::assert_snapshot!("fish_adapter_rendered_output", fish_out);
+
+    let nu_out = ShellDialect::Nu.adapter().render_output(&req, &env, &out);
+    insta::assert_snapshot!("nu_adapter_rendered_output", nu_out);
 }
 
 #[test]
@@ -244,6 +277,43 @@ fn test_fish_hook_hardened_builtins() {
     assert!(
         hook.contains("builtin complete -c vpx --keep-order"),
         "Fish hook must use 'builtin complete -c vpx --keep-order'"
+    );
+}
+
+#[test]
+fn test_nu_adapter_comp_line_fallback() {
+    let adapter = ShellDialect::Nu.adapter();
+    let cwd = PathBuf::from("/workspace");
+    let argv = vec![OsString::from("vp")];
+    let env = |k: &str| match k {
+        "VP_COMPLETE" => Some("nu".into()),
+        "COMP_LINE" => Some("vp run build".into()),
+        "COMP_POINT" => Some("12".into()),
+        _ => None,
+    };
+
+    match adapter.parse_input(&env, &argv, &cwd) {
+        ShellInputMode::Complete(req) => {
+            assert_eq!(req.words, vec!["vp", "run", "build"]);
+            assert_eq!(req.current_index, 2);
+            assert_eq!(req.cwd, cwd);
+        }
+        ShellInputMode::RegistrationHook => {
+            panic!("Expected Complete mode via COMP_LINE/COMP_POINT fallback");
+        }
+    }
+}
+
+#[test]
+fn test_nu_hook_uses_modern_custom_completer() {
+    let hook = ShellDialect::Nu.adapter().render_hook();
+    assert!(
+        hook.contains("def \"nu-complete vp\" [buffer: string, place: any]"),
+        "NuAdapter::render_hook must emit modern record-aware custom completer, got: {hook}"
+    );
+    assert!(
+        !hook.contains("{|spans|"),
+        "NuAdapter::render_hook must not emit Nushell 0.116-deprecated single-arg external completer"
     );
 }
 
@@ -311,6 +381,99 @@ fn test_bash_escaped_and_quoted_paths() {
     let rendered3 = adapter.render_output(&req3, &env3, &out3);
     let lines3: Vec<&str> = rendered3.lines().collect();
     assert_eq!(lines3[0], "my dir/it'\\''s$1.js");
+}
+
+#[test]
+fn test_zsh_fish_nu_parse_quoted_inputs() {
+    let cwd = PathBuf::from("/workspace");
+
+    // Zsh unquotes all words
+    let zsh_argv = vec![
+        OsString::from("vp"),
+        OsString::from("--"),
+        OsString::from("vp"),
+        OsString::from("-C"),
+        OsString::from("\"packages/sub pkg\""),
+        OsString::from("\"my dir/fi"),
+    ];
+    let zsh_env = |k: &str| match k {
+        "_VP_COMPLETE_INDEX" => Some("3".into()),
+        _ => None,
+    };
+    let ShellInputMode::Complete(zsh_req) =
+        ShellDialect::Zsh.adapter().parse_input(&zsh_env, &zsh_argv, &cwd)
+    else {
+        panic!("Expected Zsh Complete");
+    };
+    assert_eq!(zsh_req.words, vec!["vp", "-C", "packages/sub pkg", "my dir/fi"]);
+
+    // Fish preserves already-unquoted prior tokens and unquotes only words[idx]
+    let fish_argv = vec![
+        OsString::from("vp"),
+        OsString::from("--"),
+        OsString::from("vp"),
+        OsString::from("it's-already-unquoted"),
+        OsString::from("\"my dir/fi"),
+    ];
+    let fish_env = |k: &str| match k {
+        "_VP_COMPLETE_INDEX" => Some("2".into()),
+        _ => None,
+    };
+    let ShellInputMode::Complete(fish_req) =
+        ShellDialect::Fish.adapter().parse_input(&fish_env, &fish_argv, &cwd)
+    else {
+        panic!("Expected Fish Complete");
+    };
+    assert_eq!(fish_req.words, vec!["vp", "it's-already-unquoted", "my dir/fi"]);
+
+    // Nushell unquotes double, single, backtick, and raw quotes across spans
+    let nu_argv = vec![
+        OsString::from("vp"),
+        OsString::from("--"),
+        OsString::from("vp"),
+        OsString::from("-C"),
+        OsString::from("\"packages/sub pkg\""),
+        OsString::from("`my dir/fi"),
+    ];
+    let nu_env = |k: &str| match k {
+        "_VP_COMPLETE_INDEX" => Some("3".into()),
+        _ => None,
+    };
+    let ShellInputMode::Complete(nu_req) =
+        ShellDialect::Nu.adapter().parse_input(&nu_env, &nu_argv, &cwd)
+    else {
+        panic!("Expected Nu Complete");
+    };
+    assert_eq!(nu_req.words, vec!["vp", "-C", "packages/sub pkg", "my dir/fi"]);
+}
+
+#[test]
+fn test_nu_apostrophe_and_tilde_space_quoting() {
+    let adapter = ShellDialect::Nu.adapter();
+    let req = CompletionRequest::new(
+        vec!["vp".into(), "node".into(), "~/".into()],
+        2,
+        PathBuf::from("/workspace"),
+    );
+    let env = |k: &str| match k {
+        "HOME" => Some("/Users/alice".into()),
+        _ => None,
+    };
+    let out = CompletionOutput::new(
+        vec![
+            CompletionItem::new("abc'def", None::<String>, ItemKind::File),
+            CompletionItem::directory("~/Library/Application Support/"),
+            CompletionItem::directory("~/Documents/"),
+        ],
+        CompletionDirective::NO_SPACE,
+    );
+
+    let rendered = adapter.render_output(&req, &env, &out);
+    let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+    let arr = parsed.as_array().unwrap();
+    assert_eq!(arr[0]["value"], "\"abc'def\"");
+    assert_eq!(arr[1]["value"], "\"/Users/alice/Library/Application Support/\"");
+    assert_eq!(arr[2]["value"], "~/Documents/");
 }
 
 #[test]

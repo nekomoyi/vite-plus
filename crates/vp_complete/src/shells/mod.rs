@@ -1,11 +1,13 @@
 pub mod bash;
 pub mod fish;
+pub mod nu;
 pub mod zsh;
 
 use std::{ffi::OsString, fmt, path::Path, str::FromStr};
 
 pub use bash::BashAdapter;
 pub use fish::FishAdapter;
+pub use nu::NuAdapter;
 pub use zsh::ZshAdapter;
 
 use crate::{
@@ -17,6 +19,7 @@ pub enum ShellDialect {
     Bash,
     Zsh,
     Fish,
+    Nu,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +41,7 @@ impl FromStr for ShellDialect {
             "bash" => Ok(Self::Bash),
             "zsh" => Ok(Self::Zsh),
             "fish" => Ok(Self::Fish),
+            "nu" | "nushell" => Ok(Self::Nu),
             _ => Err(ParseDialectError(s.to_string())),
         }
     }
@@ -49,6 +53,7 @@ impl fmt::Display for ShellDialect {
             Self::Bash => "bash",
             Self::Zsh => "zsh",
             Self::Fish => "fish",
+            Self::Nu => "nu",
         })
     }
 }
@@ -86,6 +91,7 @@ impl ShellDialect {
             Self::Bash => &BashAdapter,
             Self::Zsh => &ZshAdapter,
             Self::Fish => &FishAdapter,
+            Self::Nu => &NuAdapter,
         }
     }
 }

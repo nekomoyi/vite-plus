@@ -14,6 +14,7 @@ doctest = false
 bitflags = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [[example]]
 name = "mock_vp"
