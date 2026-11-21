@@ -10,6 +10,7 @@ struct ConfigCliArgs {
     #[arg(
         long,
         value_name = "path",
+        value_hint = clap::ValueHint::DirPath,
         help = "Custom hooks directory (default: .vite-hooks, or last used in this clone)"
     )]
     hooks_dir: Option<String>,
@@ -47,7 +48,7 @@ struct ConfigCliArgs {
     no_agent: bool,
 }
 
-fn config_command() -> Command {
+pub(crate) fn config_command() -> Command {
     ConfigCliArgs::augment_args(
         Command::new("vp config")
             .about("Configure Vite+ for the current project (hook dispatcher + agent integration).")

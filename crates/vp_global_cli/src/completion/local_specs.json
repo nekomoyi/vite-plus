@@ -1,0 +1,774 @@
+[
+  {
+    "name": "build",
+    "about": "Build for production",
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "args",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "cache",
+    "about": "Manage the task cache",
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "subcommands": [
+      {
+        "name": "clean",
+        "about": "Clean up all the cache",
+        "flags": [
+          {
+            "long": "help",
+            "short": "h",
+            "about": "Print help"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "check",
+    "about": "Run format, lint, and type checks",
+    "flags": [
+      {
+        "long": "continue-on-error",
+        "about": "Run remaining checks even if an earlier check fails"
+      },
+      {
+        "long": "fix",
+        "about": "Auto-fix format and lint issues"
+      },
+      {
+        "long": "fix-dangerously",
+        "about": "Auto-fix format and lint issues, including dangerous fixes and suggestions"
+      },
+      {
+        "long": "quiet",
+        "about": "Disable reporting on warnings, only errors are reported"
+      },
+      {
+        "long": "deny-warnings",
+        "about": "Treat lint warnings as errors"
+      },
+      {
+        "long": "no-fmt",
+        "about": "Skip format check"
+      },
+      {
+        "long": "no-lint",
+        "about": "Skip lint rules; type-check still runs when `lint.options.typeCheck` is true"
+      },
+      {
+        "long": "no-error-on-unmatched-pattern",
+        "about": "Do not exit with error when pattern is unmatched"
+      },
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "paths",
+        "about": "File paths to check (passed through to fmt and lint)",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "config",
+    "about": "Configure Vite+ for the current project (hook dispatcher + agent integration).",
+    "flags": [
+      {
+        "long": "hooks-dir",
+        "about": "Custom hooks directory (default: .vite-hooks, or last used in this clone)",
+        "takes_value": true,
+        "value_hint": "dir_path"
+      },
+      {
+        "long": "hooks",
+        "about": "Install the hook dispatcher"
+      },
+      {
+        "long": "no-hooks",
+        "about": "Skip hook dispatcher installation"
+      },
+      {
+        "long": "agent",
+        "about": "Update coding agent instructions"
+      },
+      {
+        "long": "no-agent",
+        "about": "Skip updating coding agent instructions"
+      },
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Show this help message"
+      }
+    ]
+  },
+  {
+    "name": "create",
+    "about": "Use any builtin, local or remote template with Vite+.",
+    "flags": [
+      {
+        "long": "directory",
+        "about": "Target directory for the generated project",
+        "takes_value": true,
+        "value_hint": "dir_path"
+      },
+      {
+        "long": "agent",
+        "about": "Write coding agent instructions to AGENTS.md, CLAUDE.md, etc.",
+        "takes_value": true,
+        "multiple": true
+      },
+      {
+        "long": "no-agent",
+        "about": "Skip writing coding agent instructions"
+      },
+      {
+        "long": "editor",
+        "about": "Write editor config files for the specified editor",
+        "takes_value": true,
+        "multiple": true
+      },
+      {
+        "long": "no-editor",
+        "about": "Skip writing editor config files"
+      },
+      {
+        "long": "git",
+        "about": "Initialize a git repository"
+      },
+      {
+        "long": "no-git",
+        "about": "Skip git repository initialization"
+      },
+      {
+        "long": "hooks",
+        "about": "Set up pre-commit hooks (default in non-interactive mode)"
+      },
+      {
+        "long": "no-hooks",
+        "about": "Skip pre-commit hooks setup"
+      },
+      {
+        "long": "package-manager",
+        "about": "Use the specified package manager",
+        "takes_value": true
+      },
+      {
+        "long": "approve-builds",
+        "about": "Approve and run gated dependency build scripts without prompting"
+      },
+      {
+        "long": "verbose",
+        "about": "Show detailed scaffolding output"
+      },
+      {
+        "long": "interactive",
+        "about": "Enable interactive prompts"
+      },
+      {
+        "long": "no-interactive",
+        "about": "Run in non-interactive mode"
+      },
+      {
+        "long": "list",
+        "about": "List all available templates"
+      },
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Show this help message"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "template",
+        "about": "Builtin, local, or remote template name"
+      },
+      {
+        "name": "template_args",
+        "about": "Arguments passed to the template without changes",
+        "multiple": true,
+        "last": true
+      }
+    ]
+  },
+  {
+    "name": "dev",
+    "about": "Run the development server",
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "args",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "doc",
+    "about": "Build documentation",
+    "hidden": true,
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "args",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "exec",
+    "about": "Execute a command from local node_modules/.bin",
+    "flags": [
+      {
+        "long": "recursive",
+        "short": "r",
+        "about": "Select all packages in the workspace"
+      },
+      {
+        "long": "transitive",
+        "short": "t",
+        "about": "Select the current package and its transitive dependencies"
+      },
+      {
+        "long": "workspace-root",
+        "short": "w",
+        "about": "Select the workspace root package"
+      },
+      {
+        "long": "filter",
+        "short": "F",
+        "about": "Match packages by name, directory, or glob pattern",
+        "takes_value": true,
+        "multiple": true
+      },
+      {
+        "long": "fail-if-no-match",
+        "about": "Exit with a non-zero status if a `--filter` expression matches no packages"
+      },
+      {
+        "long": "shell-mode",
+        "short": "c",
+        "about": "Execute the command within a shell environment"
+      },
+      {
+        "long": "parallel",
+        "about": "Run concurrently without topological ordering"
+      },
+      {
+        "long": "reverse",
+        "about": "Reverse execution order"
+      },
+      {
+        "long": "resume-from",
+        "about": "Resume from a specific package",
+        "takes_value": true
+      },
+      {
+        "long": "report-summary",
+        "about": "Save results to vp-exec-summary.json"
+      },
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help (see more with '--help')"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "command",
+        "about": "Command and arguments to execute",
+        "multiple": true,
+        "trailing_var_arg": true
+      }
+    ]
+  },
+  {
+    "name": "fmt",
+    "about": "Format code",
+    "visible_aliases": ["format"],
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "args",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "hooks",
+    "about": "Manage the Vite+ Git hook dispatcher for this repository.",
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Show this help message"
+      }
+    ],
+    "subcommands": [
+      {
+        "name": "enable",
+        "about": "Install or refresh the hook dispatcher (sets core.hooksPath)",
+        "flags": [
+          {
+            "long": "hooks-dir",
+            "about": "Custom hooks directory (default: .vite-hooks, or last used)",
+            "takes_value": true,
+            "value_hint": "dir_path"
+          },
+          {
+            "long": "help",
+            "short": "h",
+            "about": "Show this help message"
+          },
+          {
+            "long": "replace-husky",
+            "about": "Replace a local Husky hooks path after migrating custom checks (old files are preserved but no longer run)"
+          }
+        ]
+      },
+      {
+        "name": "disable",
+        "about": "Disable hooks: unset core.hooksPath, remove <dir>/_, persist preference",
+        "flags": [
+          {
+            "long": "hooks-dir",
+            "about": "Custom hooks directory (default: .vite-hooks, or last used)",
+            "takes_value": true,
+            "value_hint": "dir_path"
+          },
+          {
+            "long": "help",
+            "short": "h",
+            "about": "Show this help message"
+          }
+        ]
+      },
+      {
+        "name": "status",
+        "about": "Show preference, core.hooksPath, and dispatcher state",
+        "flags": [
+          {
+            "long": "hooks-dir",
+            "about": "Custom hooks directory (default: .vite-hooks, or last used)",
+            "takes_value": true,
+            "value_hint": "dir_path"
+          },
+          {
+            "long": "help",
+            "short": "h",
+            "about": "Show this help message"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "lint",
+    "about": "Lint code",
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "args",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "migrate",
+    "about": "Migrate existing toolchains to Vite+.",
+    "flags": [
+      {
+        "long": "agent",
+        "about": "Write coding agent instructions to AGENTS.md, CLAUDE.md, etc.",
+        "takes_value": true,
+        "multiple": true
+      },
+      {
+        "long": "no-agent",
+        "about": "Skip writing coding agent instructions"
+      },
+      {
+        "long": "editor",
+        "about": "Write editor config files into the project",
+        "takes_value": true,
+        "multiple": true
+      },
+      {
+        "long": "no-editor",
+        "about": "Skip writing editor config files"
+      },
+      {
+        "long": "hooks",
+        "about": "Set up pre-commit hooks (default in non-interactive mode)"
+      },
+      {
+        "long": "no-hooks",
+        "about": "Skip pre-commit hooks setup"
+      },
+      {
+        "long": "interactive",
+        "about": "Enable interactive prompts"
+      },
+      {
+        "long": "no-interactive",
+        "about": "Run in non-interactive mode (skip prompts and use defaults)"
+      },
+      {
+        "long": "full",
+        "about": "Also run the full setup for an existing Vite+ project"
+      },
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Show this help message"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "path",
+        "about": "Target directory to migrate (default: current directory)",
+        "value_hint": "dir_path"
+      }
+    ]
+  },
+  {
+    "name": "pack",
+    "about": "Build library",
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "args",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "preview",
+    "about": "Preview production build",
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "args",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "run",
+    "about": "Run tasks",
+    "flags": [
+      {
+        "long": "recursive",
+        "short": "r",
+        "about": "Select all packages in the workspace"
+      },
+      {
+        "long": "transitive",
+        "short": "t",
+        "about": "Select the current package and its transitive dependencies"
+      },
+      {
+        "long": "workspace-root",
+        "short": "w",
+        "about": "Select the workspace root package"
+      },
+      {
+        "long": "filter",
+        "short": "F",
+        "about": "Match packages by name, directory, or glob pattern",
+        "takes_value": true,
+        "multiple": true
+      },
+      {
+        "long": "fail-if-no-match",
+        "about": "Exit with a non-zero status if a `--filter` expression matches no packages"
+      },
+      {
+        "long": "ignore-depends-on",
+        "about": "Do not run dependencies specified in `dependsOn` fields"
+      },
+      {
+        "long": "verbose",
+        "short": "v",
+        "about": "Show full detailed summary after execution. A cache miss checks every input, so the summary lists every change. Twice (`-vv`), it also lists everything each cached run depends on, and its outputs",
+        "multiple": true
+      },
+      {
+        "long": "cache",
+        "about": "Force caching on for all tasks and scripts"
+      },
+      {
+        "long": "no-cache",
+        "about": "Force caching off for all tasks and scripts"
+      },
+      {
+        "long": "remote-cache",
+        "about": "How the remote cache is accessed",
+        "takes_value": true,
+        "hidden": true,
+        "value_hint": {
+          "static_values": [
+            ["off", "Remote caching is disabled"],
+            ["read", "Cached results are downloaded"],
+            [
+              "read-write",
+              "Cached results are downloaded and new results are uploaded after successful execution"
+            ]
+          ]
+        }
+      },
+      {
+        "long": "concurrency-limit",
+        "about": "Maximum number of tasks to run concurrently. Defaults to 4",
+        "takes_value": true
+      },
+      {
+        "long": "parallel",
+        "about": "Run tasks without dependency ordering. Sets concurrency to unlimited unless `--concurrency-limit` is also specified"
+      },
+      {
+        "long": "log",
+        "about": "How task output is displayed",
+        "takes_value": true,
+        "value_hint": {
+          "static_values": [
+            ["interleaved", "Output streams directly to the terminal as tasks produce it"],
+            ["labeled", "Each line is prefixed with `[packageName#taskName]`"],
+            [
+              "grouped",
+              "Output is buffered per task and printed as a block after each task completes"
+            ]
+          ]
+        }
+      },
+      {
+        "long": "dry-run",
+        "about": "Show what the run would do, and whether each command would hit the cache, without running anything or writing to the cache"
+      },
+      {
+        "long": "last-details",
+        "about": "Display the detailed summary of the last run"
+      },
+      {
+        "long": "json",
+        "about": "Print JSON instead of text. Without a task, print every package and task in the workspace, and run nothing. With a task, print what the run would do, which requires `--dry-run`"
+      },
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help (see more with '--help')"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "task_and_args",
+        "multiple": true,
+        "trailing_var_arg": true
+      }
+    ]
+  },
+  {
+    "name": "staged",
+    "about": "Run linters on staged files using staged config from vite.config.ts.",
+    "flags": [
+      {
+        "long": "allow-empty",
+        "about": "Allow empty commits when tasks revert all staged changes"
+      },
+      {
+        "long": "concurrent",
+        "short": "p",
+        "about": "Run tasks at the same time. Use false to run one task at a time",
+        "optional_value": true
+      },
+      {
+        "long": "no-concurrent",
+        "about": "Run one task at a time"
+      },
+      {
+        "long": "continue-on-error",
+        "about": "Run all tasks to completion even if one fails"
+      },
+      {
+        "long": "cwd",
+        "about": "Working directory to run all tasks in",
+        "takes_value": true,
+        "value_hint": "dir_path"
+      },
+      {
+        "long": "debug",
+        "short": "d",
+        "about": "Enable debug output"
+      },
+      {
+        "long": "diff",
+        "about": "Override the default --staged flag of git diff",
+        "takes_value": true
+      },
+      {
+        "long": "diff-filter",
+        "about": "Override the default --diff-filter=ACMR flag of git diff",
+        "takes_value": true
+      },
+      {
+        "long": "fail-on-changes",
+        "about": "Fail with exit code 1 when tasks modify tracked files"
+      },
+      {
+        "long": "hide-partially-staged",
+        "about": "Hide unstaged changes from partially staged files"
+      },
+      {
+        "long": "hide-unstaged",
+        "about": "Hide all unstaged changes before running tasks"
+      },
+      {
+        "long": "no-stash",
+        "about": "Disable the backup stash"
+      },
+      {
+        "long": "quiet",
+        "short": "q",
+        "about": "Disable console output"
+      },
+      {
+        "long": "relative",
+        "short": "r",
+        "about": "Pass filepaths relative to cwd to tasks"
+      },
+      {
+        "long": "revert",
+        "about": "Revert to original state in case of errors"
+      },
+      {
+        "long": "verbose",
+        "short": "v",
+        "about": "Show task output even when tasks succeed"
+      },
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Show this help message"
+      }
+    ]
+  },
+  {
+    "name": "test",
+    "about": "Run tests",
+    "flags": [
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "args",
+        "multiple": true,
+        "trailing_var_arg": true,
+        "value_hint": "any_path"
+      }
+    ]
+  },
+  {
+    "name": "toolchain",
+    "about": "Show active Vite+ tools, versions, and relationships",
+    "flags": [
+      {
+        "long": "json",
+        "about": "Print the graph as JSON"
+      },
+      {
+        "long": "global",
+        "short": "g",
+        "about": "Use the global Vite+ toolchain"
+      },
+      {
+        "long": "help",
+        "short": "h",
+        "about": "Print help"
+      }
+    ],
+    "positionals": [
+      {
+        "name": "tools",
+        "about": "Tool or package names to show",
+        "multiple": true
+      }
+    ]
+  }
+]
