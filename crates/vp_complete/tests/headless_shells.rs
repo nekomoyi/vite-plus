@@ -96,6 +96,35 @@ impl TestSandbox {
         path
     }
 
+    fn install_local_vp_trap(&self) -> (PathBuf, PathBuf) {
+        let local_bin_dir = self.root.join("node_modules/.bin");
+        fs::create_dir_all(&local_bin_dir).unwrap();
+        let marker = self.root.join("pwned_marker");
+        #[cfg(unix)]
+        {
+            let local_vp = local_bin_dir.join("vp");
+            fs::write(
+                &local_vp,
+                format!("#!/bin/sh\necho pwned > \"{}\"\nexit 1\n", marker.display()),
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&local_vp).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&local_vp, perms).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            let local_vp = local_bin_dir.join("vp.cmd");
+            fs::write(
+                &local_vp,
+                format!("@echo off\r\necho pwned > \"{}\"\r\nexit /b 1\r\n", marker.display()),
+            )
+            .unwrap();
+        }
+        (local_bin_dir, marker)
+    }
+
     fn run_cmd(&self, program: &Path, args: &[&str], label: &str) -> String {
         let out = Command::new(program)
             .current_dir(&self.root)
@@ -308,6 +337,716 @@ Write-Output "UN=$cUn`nEXIT=$savedExit`nEMPTY=$cEmpty`nCOLON=$cColon`nPIPE=$cPip
     assert!(stdout.contains("uninstall"), "Pwsh native completer must work: {stdout}");
 }
 
+#[test]
+fn test_local_bin_hook_prefers_global_vp() {
+    let sb = TestSandbox::new();
+    let (_, marker) = sb.install_local_vp_trap();
+    let bin_dir = sb.bin_dir.display();
+
+    if let Some(stdout) = sb.run_bash(&format!(
+        r#"
+export PATH="{bin_dir}:$PATH"
+{hook}
+COMP_LINE="./node_modules/.bin/vp un"; COMP_POINT=${{#COMP_LINE}}
+COMP_WORDS=(./node_modules/.bin/vp un); COMP_CWORD=1
+_vp_complete
+echo "BASH_COMPREPLY: ${{COMPREPLY[*]}}"
+"#,
+        hook = ShellDialect::Bash.adapter().render_hook(),
+    )) {
+        assert!(!marker.exists(), "Bash hook executed untrusted local ./node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Bash must complete via global vp: {stdout}");
+    }
+
+    if let Some(stdout) = sb.run_zsh(&format!(
+        r#"
+export PATH="{bin_dir}:$PATH"
+compadd() {{ print -l "${{(@P)${{argv[-1]}}}}"; }}
+_files() {{ :; }}
+{hook}
+words=(./node_modules/.bin/vp un); CURRENT=2; _vp_complete
+"#,
+        hook = ShellDialect::Zsh.adapter().render_hook(),
+    )) {
+        assert!(!marker.exists(), "Zsh hook executed untrusted local ./node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Zsh must complete via global vp: {stdout}");
+    }
+
+    if sb
+        .run_fish(&format!(
+            r#"
+set -gx PATH "{bin_dir}" $PATH
+{hook}
+builtin complete -c ./node_modules/.bin/vp --keep-order -f -a "(__vp_complete)"
+complete -C "./node_modules/.bin/vp un"
+"#,
+            hook = ShellDialect::Fish.adapter().render_hook(),
+        ))
+        .is_some()
+    {
+        assert!(!marker.exists(), "Fish hook executed untrusted local ./node_modules/.bin/vp!");
+    }
+
+    let nu_hook = sb.write_hook(ShellDialect::Nu, "local_hook.nu");
+    if let Some(stdout) = sb.run_nu(&format!(
+        r#"
+$env.PATH = ($env.PATH | prepend "{bin_dir}")
+source "{hook}"
+print (nu-complete vp "./node_modules/.bin/vp un" {{ command: ["./node_modules/.bin/vp", "un"] }} | get completions.value | to json --raw)
+"#,
+        hook = nu_hook.display(),
+    )) {
+        assert!(!marker.exists(), "Nushell hook executed untrusted local ./node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Nu must complete via global vp: {stdout}");
+    }
+
+    let pwsh_hook = sb.write_hook(ShellDialect::PowerShell, "local_hook.ps1");
+    if let Some(stdout) = sb.run_pwsh(&format!(
+        r#"
+$env:PATH = "{bin_dir}" + [IO.Path]::PathSeparator + $env:PATH
+. "{hook}"
+$m = (TabExpansion2 './node_modules/.bin/vp un').CompletionMatches.CompletionText -join ','
+Write-Output "PWSH_LOCAL=$m"
+"#,
+        hook = pwsh_hook.display(),
+    )) {
+        assert!(!marker.exists(), "Pwsh hook executed untrusted local ./node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Pwsh must complete via global vp: {stdout}");
+    }
+}
+
+#[test]
+fn test_local_node_modules_bin_first_on_path_and_missing_global_vp() {
+    let sb = TestSandbox::new();
+    let (local_bin_dir, marker) = sb.install_local_vp_trap();
+    let local_bin = local_bin_dir.display();
+    let bin_dir = sb.bin_dir.display();
+
+    if let Some(stdout) = sb.run_bash(&format!(
+        r#"
+export PATH="{local_bin}:{bin_dir}:/usr/bin:/bin"
+{hook}
+COMP_LINE="vp un"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp un); COMP_CWORD=1
+_vp_complete; echo "BASH_FIRST: ${{COMPREPLY[*]}}"
+export PATH="{local_bin}:/usr/bin:/bin"
+COMPREPLY=(); _vp_complete; echo "BASH_MISSING: ${{COMPREPLY[*]}}"
+"#,
+        hook = ShellDialect::Bash.adapter().render_hook(),
+    )) {
+        assert!(!marker.exists(), "Bash executed untrusted node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Bash must skip node_modules/.bin: {stdout}");
+    }
+
+    if let Some(stdout) = sb.run_zsh(&format!(
+        r#"
+export PATH="{local_bin}:{bin_dir}:/usr/bin:/bin"
+compadd() {{ print -l "${{(@P)${{argv[-1]}}}}"; }}
+_files() {{ :; }}
+{hook}
+words=(vp un); CURRENT=2; _vp_complete
+export PATH="{local_bin}:/usr/bin:/bin"; _vp_complete
+"#,
+        hook = ShellDialect::Zsh.adapter().render_hook(),
+    )) {
+        assert!(!marker.exists(), "Zsh executed untrusted node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Zsh must skip node_modules/.bin: {stdout}");
+    }
+
+    if let Some(stdout) = sb.run_fish(&format!(
+        r#"
+set -gx PATH "{local_bin}" "{bin_dir}" /usr/bin /bin
+{hook}
+complete -C "vp un"
+set -gx PATH "{local_bin}" /usr/bin /bin
+complete -C "vp un"
+"#,
+        hook = ShellDialect::Fish.adapter().render_hook(),
+    )) {
+        assert!(!marker.exists(), "Fish executed untrusted node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Fish must skip node_modules/.bin: {stdout}");
+    }
+
+    let nu_hook = sb.write_hook(ShellDialect::Nu, "untrusted_nu.nu");
+    if let Some(stdout) = sb.run_nu(&format!(
+        r#"
+$env.PATH = ["{local_bin}", "{bin_dir}", "/usr/bin", "/bin"]
+source "{hook}"
+let res1 = ("vp un" | commandline complete)
+$env.PATH = ["{local_bin}", "/usr/bin", "/bin"]
+let res2 = ("vp un" | commandline complete)
+print ([$res1, $res2] | to json --raw)
+"#,
+        hook = nu_hook.display(),
+    )) {
+        assert!(!marker.exists(), "Nushell executed untrusted node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Nu must skip node_modules/.bin: {stdout}");
+    }
+
+    let pwsh_hook = sb.write_hook(ShellDialect::PowerShell, "untrusted_pwsh.ps1");
+    if let Some(stdout) = sb.run_pwsh(&format!(
+        r#"
+$env:PATH = "{local_bin}" + [IO.Path]::PathSeparator + "{bin_dir}" + [IO.Path]::PathSeparator + "/usr/bin:/bin"
+. "{hook}"
+$m1 = (TabExpansion2 'vp un').CompletionMatches.CompletionText -join ','
+$env:PATH = "{local_bin}" + [IO.Path]::PathSeparator + "/usr/bin:/bin"
+$m2 = (TabExpansion2 'vp un').CompletionMatches.CompletionText -join ','
+Write-Output "PWSH1=$m1`nPWSH2=$m2"
+"#,
+        hook = pwsh_hook.display(),
+    )) {
+        assert!(!marker.exists(), "PowerShell executed untrusted node_modules/.bin/vp!");
+        assert!(stdout.contains("uninstall"), "Pwsh must skip node_modules/.bin: {stdout}");
+    }
+}
+
+#[test]
+fn test_headless_quoting_directives_and_midline_regressions() {
+    let sb = TestSandbox::new();
+    let bin_dir = sb.bin_dir.display();
+
+    let spaced_dir = sb.root.join("my dir");
+    fs::create_dir_all(&spaced_dir).unwrap();
+    fs::write(spaced_dir.join("entry.js"), "console.log(1);").unwrap();
+    fs::write(sb.root.join("no_such_task_trap_file"), "trap").unwrap();
+    fs::write(sb.root.join("vp.txt"), "not vp").unwrap();
+
+    let fake_home = sb.root.join("fake_home");
+    fs::create_dir_all(fake_home.join("Library/Application Support")).unwrap();
+
+    // 1. Bash 3.2: NO_SPACE vs trailing space, NO_FILE_COMP, and escaped space path
+    if let Some(stdout) = sb.run_bash(&format!(
+        r#"
+export PATH="{bin_dir}:$PATH"
+{hook}
+COMP_LINE="vp unins"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp unins); COMP_CWORD=1
+_vp_complete; printf 'BASH_SINGLE=<%s>\n' "${{COMPREPLY[0]-}}"
+
+COMP_LINE='vp -C my\ d'; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp -C 'my\ d'); COMP_CWORD=2
+_vp_complete; printf 'BASH_NOSPACE_DIR=<%s>\n' "${{COMPREPLY[0]-}}"
+
+COMP_LINE="vp run no_such_task"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp run no_such_task); COMP_CWORD=2
+_vp_complete; printf 'BASH_NOFILE_COUNT=%d\n' "${{#COMPREPLY[@]}}"
+"#,
+        hook = ShellDialect::Bash.adapter().render_hook(),
+    )) {
+        assert!(
+            stdout.contains("BASH_NOSPACE_DIR=<my\\ dir/>"),
+            "Bash must preserve escaped space prefix and omit trailing space on NO_SPACE dir: {stdout}"
+        );
+        assert!(
+            stdout.contains("BASH_NOFILE_COUNT=0"),
+            "Bash must respect NO_FILE_COMP without falling back to files: {stdout}"
+        );
+    }
+
+    // 2. Zsh ZLE: NO_SPACE (`-S ''` after `_vp_items`) + quoted path completion
+    let zsh_hook = sb.write_hook(ShellDialect::Zsh, "reg_hook.zsh");
+    fs::write(
+        sb.root.join(".zshrc"),
+        format!(
+            r#"bindkey -e
+PROMPT='PROMPT> '
+export PATH="{bin_dir}:$PATH"
+source "{hook}"
+dump_buf() {{ print -r -- "ZBUF=<$BUFFER>" >> "{temp_dir}/zbuf.txt"; print "ZDUMP_DONE"; }}
+zle -N dump_buf
+bindkey "^O" dump_buf
+autoload -Uz compinit && compinit -u -D
+"#,
+            hook = zsh_hook.display(),
+            temp_dir = sb.root.display(),
+        ),
+    )
+    .unwrap();
+    if let Some(stdout) = sb.run_zsh(&format!(
+        r#"
+zmodload zsh/zpty || exit 0
+export ZDOTDIR="{temp_dir}"
+for input in 'vp -C "my d' 'vp node "my dir/en'; do
+  zpty p /bin/zsh -di
+  zpty -r p o "*PROMPT> *" || {{ zpty -d p; exit 1; }}
+  zpty -w -n p "$input"$'\t\x0f'
+  zpty -r p o "*ZDUMP_DONE*" || {{ zpty -d p; exit 1; }}
+  zpty -d p
+done
+cat "{temp_dir}/zbuf.txt"
+"#,
+        temp_dir = sb.root.display(),
+    )) {
+        assert!(
+            stdout.contains("my dir/") && stdout.contains("entry.js"),
+            "Zsh ZLE must complete NO_SPACE directory and quoted file path via _describe: {stdout}"
+        );
+    }
+
+    // 3. Fish: quoted path completion
+    if let Some(stdout) = sb.run_fish(&format!(
+        "set -gx PATH \"{bin_dir}\" $PATH\n{hook}\ncomplete -C 'vp node \"my dir/en'\n",
+        hook = ShellDialect::Fish.adapter().render_hook(),
+    )) {
+        assert!(stdout.contains("my dir/entry.js"), "Fish quoted path completion: {stdout}");
+    }
+
+    // 4. Nushell: `~/Library/Applica` with space + quoted path completion
+    let nu_hook = sb.write_hook(ShellDialect::Nu, "reg_hook.nu");
+    if let Some(stdout) = sb.run_nu(&format!(
+        r#"
+$env.HOME = "{fake_home}"
+$env.PATH = ($env.PATH | prepend "{bin_dir}")
+let child = (^$nu.current-exe -n -c 'source "{hook}"; ["vp -C ~/Library/Applica", "vp node \"my dir/en"] | each {{|line| $line | commandline complete }} | to json --raw' | complete)
+if $child.exit_code != 0 {{ error make {{ msg: $child.stderr }} }}
+print $child.stdout
+"#,
+        fake_home = fake_home.display(),
+        hook = nu_hook.display(),
+    )) {
+        assert!(
+            stdout.contains("Application Support/") && stdout.contains("my dir/entry.js"),
+            "Nu must complete tilde path with spaces and quoted path: {stdout}"
+        );
+    }
+
+    // 5. PowerShell: mid-token `TabExpansion2 'vp uninstall --global' 5` + `./vp.txt un` guard
+    let pwsh_hook = sb.write_hook(ShellDialect::PowerShell, "reg_hook.ps1");
+    if let Some(stdout) = sb.run_pwsh(&format!(
+        r#"
+$ErrorActionPreference = 'Stop'
+$env:PATH = "{bin_dir}" + [IO.Path]::PathSeparator + $env:PATH
+. "{hook}"
+$mid = TabExpansion2 'vp uninstall --global' 5
+$midMatches = $mid.CompletionMatches.CompletionText -join ','
+$vpTxt = (TabExpansion2 './vp.txt un').CompletionMatches.CompletionText -join ','
+Write-Output "MID_MATCHES=$midMatches`nMID_SPAN=$($mid.ReplacementIndex):$($mid.ReplacementLength)`nVPTXT=$vpTxt"
+"#,
+        hook = pwsh_hook.display(),
+    )) {
+        assert!(
+            stdout.contains("uninstall")
+                && stdout.contains("unlink")
+                && stdout.contains("MID_SPAN=3:9"),
+            "Pwsh mid-token completion must slice at cursor and replace full token (3:9): {stdout}"
+        );
+        assert!(
+            !stdout.contains("VPTXT=un,uninstall"),
+            "Pwsh must not treat ./vp.txt as vp: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn test_shell_regressions_braces_env_tilde_word_zero() {
+    let sb = TestSandbox::new();
+    let bin_dir = sb.bin_dir.display();
+    let fake_home = sb.root.join("fake_home");
+    let home_proj = fake_home.join("project");
+    fs::create_dir_all(&home_proj).unwrap();
+    fs::write(home_proj.join("entry.js"), "export default 1;\n").unwrap();
+    fs::write(sb.root.join("name{one,two}.js"), "1\n").unwrap();
+    fs::write(sb.root.join("hello!world.js"), "2\n").unwrap();
+
+    let dash_dir = fake_home.join("-dashdir");
+    let space_proj = sb.root.join("project space");
+    let probe_marker = sb.root.join("PROBE_MARKER");
+    fs::create_dir_all(&dash_dir).unwrap();
+    fs::create_dir_all(&space_proj).unwrap();
+    fs::write(sb.root.join("vite.config.ts"), "export default {};\n").unwrap();
+    fs::write(sb.root.join("nefar$(touch PROBE_MARKER).txt"), "safe\n").unwrap();
+
+    // 1. Bash: brace & history expansion escaping, leading env assignments, and -C ~/project
+    if let Some(stdout) = sb.run_bash(&format!(
+        r#"
+export HOME="{fake_home}"
+export PATH="{bin_dir}:$PATH"
+{hook}
+
+COMP_LINE="vp node name"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp node name); COMP_CWORD=2
+_vp_complete
+set +f
+eval "arr_brace=(${{COMPREPLY[0]}})"
+echo "BRACE_COUNT=${{#arr_brace[@]}} BRACE_VAL=${{arr_brace[0]}}"
+
+set -H
+COMP_LINE="vp node hello"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp node hello); COMP_CWORD=2
+_vp_complete
+echo "BANG_RAW=${{COMPREPLY[0]}}"
+
+COMP_LINE="CI=1 vp un"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(CI=1 vp un); COMP_CWORD=2
+_vp_complete
+echo "ENV_CMD=${{COMPREPLY[*]}}"
+
+COMP_LINE="CI=1 vp run build:wa"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(CI=1 vp run build:wa); COMP_CWORD=4
+_vp_complete
+echo "ENV_TASK=${{COMPREPLY[*]}}"
+
+COMP_LINE='FOO=$(echo "$(printf "(")") vp run build:wa'; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(FOO=x vp run build:wa); COMP_CWORD=4
+_vp_complete
+echo "NESTED_ENV_TASK=${{COMPREPLY[*]}}"
+
+COMP_LINE='FOO="`printf '\''"'\''`" vp run build:wa'; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(FOO=x vp run build:wa); COMP_CWORD=4
+_vp_complete
+echo "BACKTICK_ENV_TASK=${{COMPREPLY[*]}}"
+
+COMP_LINE="vp dev --mode nefar"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp dev --mode nefar); COMP_CWORD=3
+_vp_complete
+eval "arr_nefar=(${{COMPREPLY[0]}})"
+echo "NEFAR_VAL=${{arr_nefar[0]}}"
+
+COMP_LINE="vp -C ~/project node en"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp -C ~/project node en); COMP_CWORD=4
+_vp_complete
+echo "BASH_TILDE=${{COMPREPLY[*]}}"
+        COMP_LINE='vp node "hello'; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp node '"hello'); COMP_CWORD=2
+        _vp_complete
+        echo "BANG_DQ=${{COMPREPLY[0]}}"
+
+        COMP_LINE="FOO=\$(echo hi there) vp un"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(FOO=x vp un); COMP_CWORD=2
+        _vp_complete
+        echo "ENV_SUBST=${{COMPREPLY[*]}}"
+
+        COMP_LINE="vp -C~/proj"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp -C~/proj); COMP_CWORD=1
+        _vp_complete
+        echo "BASH_ATTACHED_TILDE=${{COMPREPLY[0]}}"
+
+        COMP_LINE="vp -C=~/proj"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp -C = "~/proj"); COMP_CWORD=3
+        _vp_complete
+        echo "BASH_EQ_TILDE=${{COMPREPLY[0]}}"
+
+        COMP_LINE='vp -C="project sp'; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp -C '="project sp'); COMP_CWORD=2
+        _vp_complete
+        echo "BASH_EQ_QUOTED=<${{COMPREPLY[0]}}>"
+
+        COMP_LINE='vp -C"project sp'; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp '-C"project sp'); COMP_CWORD=1
+        _vp_complete
+        echo "BASH_ATTACHED_QUOTED=<${{COMPREPLY[0]}}>"
+
+        COMP_LINE='vp dev --config="vite.con'; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp dev --config '="vite.con'); COMP_CWORD=3
+        _vp_complete
+        echo "BASH_LONG_QUOTED=<${{COMPREPLY[0]}}>"
+"#,
+        fake_home = fake_home.display(),
+        hook = ShellDialect::Bash.adapter().render_hook(),
+    )) {
+        assert!(
+            !probe_marker.exists() && stdout.contains("NEFAR_VAL=nefar$(touch "),
+            "Bash fallback file completion must escape command substitutions without executing them: {stdout}"
+        );
+        assert!(
+            stdout.contains("BRACE_COUNT=1 BRACE_VAL=name{one,two}.js"),
+            "Bash must escape braces to prevent brace expansion: {stdout}"
+        );
+        assert!(
+            stdout.contains(r"BANG_RAW=hello\!world.js"),
+            "Bash must escape ! to prevent history expansion: {stdout}"
+        );
+        assert!(
+            stdout.contains("BANG_DQ=hello\"'!'\"world.js"),
+            "Bash must safely quote ! inside double quotes: {stdout}"
+        );
+        assert!(
+            stdout.contains("uninstall") && stdout.contains("ENV_SUBST=uninstall"),
+            "Bash must complete subcommands after leading CI=1 and FOO=$(...): {stdout}"
+        );
+        assert!(
+            stdout.contains("ENV_TASK=watch")
+                && stdout.contains("NESTED_ENV_TASK=watch")
+                && stdout.contains("BACKTICK_ENV_TASK=watch"),
+            "Bash must complete tasks after leading CI=1, nested $(), and quoted backticks: {stdout}"
+        );
+        assert!(
+            stdout.contains("BASH_TILDE=entry.js"),
+            "Bash must resolve -C ~/project against HOME: {stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("BASH_ATTACHED_TILDE=-C{}/project/", fake_home.display())),
+            "Bash -C~/proj must expand to executable HOME path: {stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("BASH_EQ_TILDE={}/project/", fake_home.display())),
+            "Bash -C=~/proj must expand value after = to HOME path: {stdout}"
+        );
+        assert!(
+            stdout.contains("BASH_EQ_QUOTED=<project space/>")
+                && stdout.contains("BASH_ATTACHED_QUOTED=<project space/>")
+                && stdout.contains("BASH_LONG_QUOTED=<vite.config.ts>"),
+            "Bash quoted attached flags must trim flag prefix to match Readline replacement span: {stdout}"
+        );
+    }
+
+    // 2. Fish: -C ~/project node en
+    if let Some(stdout) = sb.run_fish(&format!(
+        "set -gx HOME \"{fake_home}\"\nset -gx PATH \"{bin_dir}\" $PATH\n{hook}\ncomplete -C 'vp -C ~/project node en'\n",
+        fake_home = fake_home.display(),
+        hook = ShellDialect::Fish.adapter().render_hook(),
+    )) {
+        assert!(stdout.contains("entry.js"), "Fish must resolve -C ~/project: {stdout}");
+    }
+
+    // 3. Nushell: -C ~/project node en + attached -C~/proj
+    let nu_hook = sb.write_hook(ShellDialect::Nu, "tilde_hook.nu");
+    if let Some(stdout) = sb.run_nu(&format!(
+        r#"
+$env.HOME = "{fake_home}"
+$env.PATH = ($env.PATH | prepend "{bin_dir}")
+let child = (^$nu.current-exe -n -c 'source "{hook}"; print ("vp -C ~/project node en" | commandline complete | to json --raw); print ("vp -C~/proj" | commandline complete | to json --raw)' | complete)
+if $child.exit_code != 0 {{ error make {{ msg: $child.stderr }} }}
+print $child.stdout
+"#,
+        fake_home = fake_home.display(),
+        hook = nu_hook.display(),
+    )) {
+        assert!(stdout.contains("entry.js"), "Nu must resolve -C ~/project: {stdout}");
+        assert!(
+            stdout.contains(&format!("-C{}/project/", fake_home.display())),
+            "Nu must expand attached -C~/proj to HOME path: {stdout}"
+        );
+    }
+
+    // 4. PowerShell: TabExpansion2 'vp' 2 (word zero) + attached -Cpro / -C=pro / -C~/proj + standalone ./-dashdir/
+    let pwsh_hook = sb.write_hook(ShellDialect::PowerShell, "word0_hook.ps1");
+    if let Some(stdout) = sb.run_pwsh(&format!(
+        r#"
+$ErrorActionPreference = 'Stop'
+$env:HOME = "{fake_home}"
+$env:USERPROFILE = "{fake_home}"
+$env:PATH = "{bin_dir}" + [IO.Path]::PathSeparator + $env:PATH
+Set-Location "{fake_home}"
+. "{hook}"
+$w0 = TabExpansion2 'vp' 2
+$c1 = (TabExpansion2 'vp -Cpro').CompletionMatches.CompletionText -join ','
+$c2 = (TabExpansion2 'vp -C=pro').CompletionMatches.CompletionText -join ','
+$c3 = (TabExpansion2 'vp -C~/pro').CompletionMatches.CompletionText -join ','
+$cDash = (TabExpansion2 'vp -C -dash').CompletionMatches.CompletionText -join ','
+Write-Output "W0_OK=$($null -ne $w0)"
+Write-Output "PWSH_C1=$c1"
+Write-Output "PWSH_C2=$c2"
+Write-Output "PWSH_C3=$c3"
+Write-Output "PWSH_DASH=$cDash"
+"#,
+        fake_home = fake_home.display(),
+        hook = pwsh_hook.display(),
+    )) {
+        assert!(stdout.contains("W0_OK=True"), "Pwsh word-zero completion must succeed: {stdout}");
+        assert!(
+            stdout.contains("PWSH_C1=-Cproject/"),
+            "Pwsh attached -Cpro must not prepend ./: {stdout}"
+        );
+        assert!(
+            stdout.contains("PWSH_C2=-C=project/"),
+            "Pwsh attached -C=pro must not prepend ./: {stdout}"
+        );
+        assert!(
+            stdout.contains(&format!("PWSH_C3=-C{}/project/", fake_home.display())),
+            "Pwsh attached -C~/pro must expand to HOME path: {stdout}"
+        );
+        assert!(
+            stdout.contains("PWSH_DASH=./-dashdir/"),
+            "Pwsh standalone dash directory must use portable ./-dashdir/ prefix: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn test_zsh_interactive_ux_and_cross_shell_chdir_fallback() {
+    let sb = TestSandbox::new();
+    let bin_dir = sb.bin_dir.display();
+    let fake_home = sb.root.join("fake_home");
+    let home_proj = fake_home.join("project");
+    let dollar_home = sb.root.join("my$home [1]");
+    let quote_home = sb.root.join("my'home [1]");
+    let work_sub = sb.root.join("workspace/sub");
+    fs::create_dir_all(&home_proj).unwrap();
+    fs::create_dir_all(dollar_home.join("project")).unwrap();
+    fs::create_dir_all(quote_home.join("project")).unwrap();
+    fs::create_dir_all(&work_sub).unwrap();
+    fs::write(home_proj.join("entry.js"), "export default 1;\n").unwrap();
+
+    for base in [&work_sub, &sb.root] {
+        let literal = base.join("~/project");
+        fs::create_dir_all(&literal).unwrap();
+        fs::write(literal.join("entry-literal.js"), "").unwrap();
+    }
+
+    // 1. Real interactive Zsh ZLE (`zpty`) verification of exact $BUFFER results
+    let zsh_hook = sb.write_hook(ShellDialect::Zsh, "ux_hook.zsh");
+    fs::write(
+        sb.root.join(".zshrc"),
+        format!(
+            r#"stty -ixon 2>/dev/null
+bindkey -e
+PROMPT='P> '
+export HOME="{fake_home}"
+export PATH="{bin_dir}:$PATH"
+cd "{work_sub}"
+autoload -Uz compinit && compinit -u -D
+source "{hook}"
+snap_and_clear() {{
+  local -a eval_words
+  eval "eval_words=($BUFFER)" 2>/dev/null || eval_words=("__EVAL_ERR__")
+  print -r -- "SNAP=<$BUFFER> ARG1=<${{eval_words[2]-}}>" >> "{out_file}"
+  BUFFER=""
+  print "__SNAP_DONE__"
+  zle send-break
+}}
+zle -N snap_and_clear
+bindkey "^X^E" snap_and_clear
+"#,
+            fake_home = fake_home.display(),
+            hook = zsh_hook.display(),
+            work_sub = work_sub.display(),
+            out_file = sb.root.join("zsh_ux_snaps.txt").display(),
+        ),
+    )
+    .unwrap();
+
+    if let Some(stdout) = sb.run_zsh(&format!(
+        r#"
+zmodload zsh/zpty || exit 0
+export ZDOTDIR="{temp_dir}"
+zpty p /bin/zsh -di
+zpty -r p o "*P> *" || {{ zpty -d p; exit 1; }}
+
+probe() {{
+  zpty -w -n p "$1"$'\x18\x05'
+  zpty -r p o "*__SNAP_DONE__*" || {{ zpty -d p; exit 1; }}
+  zpty -r p o "*P> *" || {{ zpty -d p; exit 1; }}
+}}
+
+probe $'vp run @vit\t'
+probe $'vp run build\t'
+probe $'vp run build:\t\t'
+probe $'vp run "@vit\t'
+probe $'vp -C ..\t'
+probe $'vp -C ~/proj\t'
+probe $'vp -C~\t'
+probe $'vp -C~/proj\t'
+probe $'vp -C=~/proj\t'
+probe $'vp -C ~/proj\t '
+probe $'vp -C ~/project passthrough en\t'
+probe "vp -C '~/project' passthrough en"$'\t'
+probe "vp node '~/project/entry-l"$'\t'
+
+
+zpty -w p 'export HOME='\''{dollar_home}'\'''
+zpty -r p o "*P> *" || {{ zpty -d p; exit 1; }}
+probe $'vp "-C~/proj\t"'
+
+zpty -w p "export HOME=\"{quote_home}\""
+zpty -r p o "*P> *" || {{ zpty -d p; exit 1; }}
+probe $'vp \'-C~/proj\t\''
+
+zpty -w p 'export HOME="{fake_home}"; setopt extendedglob'
+zpty -r p o "*P> *" || {{ zpty -d p; exit 1; }}
+probe $'vp run @vit\t'
+
+zpty -w p "exit"
+zpty -d p
+cat "{temp_dir}/zsh_ux_snaps.txt"
+"#,
+        temp_dir = sb.root.display(),
+        dollar_home = dollar_home.display(),
+        quote_home = quote_home.display(),
+        fake_home = fake_home.display(),
+    )) {
+        let home_disp = fake_home.display();
+        let expected_c_home = format!("SNAP=<vp -C{home_disp}/>");
+        let expected_c_proj = format!("SNAP=<vp -C{home_disp}/project/>");
+        let expected_ceq_proj = format!("SNAP=<vp -C={home_disp}/project/>");
+        let expected_dq_dollar = format!("ARG1=<-C{}/project/>", dollar_home.display());
+        let expected_sq_quote = format!("ARG1=<-C{}/project/>", quote_home.display());
+        for expected in [
+            "SNAP=<vp run @vitejs/vite-monorepo#build >",
+            "SNAP=<vp run build:>",
+            "SNAP=<vp run build:\\*>",
+            "SNAP=<vp run \"@vitejs/vite-monorepo#build\" >",
+            "SNAP=<vp -C ../>",
+            "SNAP=<vp -C ~/project/>",
+            expected_c_home.as_str(),
+            expected_c_proj.as_str(),
+            expected_ceq_proj.as_str(),
+            "SNAP=<vp -C ~/project >",
+            "SNAP=<vp -C ~/project passthrough entry.js >",
+            "vp -C '~/project' passthrough entry-literal.js",
+            "vp node '~/project/entry-literal.js",
+            expected_dq_dollar.as_str(),
+            expected_sq_quote.as_str(),
+            "SNAP=<vp run @vitejs/vite-monorepo\\#build >",
+        ] {
+            assert!(
+                stdout.contains(expected),
+                "Zsh interactive UX mismatch: expected {expected:?} in:\n{stdout}"
+            );
+        }
+    }
+
+    // 2. Cross-shell `-C ~/project passthrough en<Tab>` file fallback in Bash, Fish, Nu, and Pwsh
+    if let Some(stdout) = sb.run_bash(&format!(
+        r#"
+export HOME="{fake_home}"
+export PATH="{bin_dir}:$PATH"
+{hook}
+COMP_LINE="vp -C ~/project passthrough en"; COMP_POINT=${{#COMP_LINE}}
+COMP_WORDS=(vp -C "~/project" passthrough en); COMP_CWORD=4
+_vp_complete; echo "BASH_FB=${{COMPREPLY[*]}}"
+"#,
+        fake_home = fake_home.display(),
+        hook = ShellDialect::Bash.adapter().render_hook(),
+    )) {
+        assert!(stdout.contains("BASH_FB=entry.js"), "Bash -C fallback failed: {stdout}");
+    }
+
+    let fish_hook = ShellDialect::Fish.adapter().render_hook();
+    // Exercise both Fish tokenization APIs even on a modern installation.
+    let (before, after) = fish_hook.split_once("builtin commandline -xpc").unwrap();
+    let legacy_hook = format!("{before}false{after}");
+    for hook in [&fish_hook, &legacy_hook] {
+        if let Some(stdout) = sb.run_fish(&format!(
+            r#"set -gx HOME "{fake_home}"
+set -gx PATH "{bin_dir}" $PATH
+{hook}
+complete -C 'vp -C ~/project passthrough en'
+complete -C "vp -C '~/project' passthrough en"
+"#,
+            fake_home = fake_home.display(),
+        )) {
+            assert!(
+                stdout.lines().any(|line| line == "entry.js")
+                    && stdout.lines().any(|line| line == "entry-literal.js"),
+                "Fish -C fallback failed: {stdout}"
+            );
+        }
+    }
+
+    let nu_hook = sb.write_hook(ShellDialect::Nu, "fb_hook.nu");
+    if let Some(stdout) = sb.run_nu(&format!(
+        r#"
+$env.HOME = "{fake_home}"
+$env.PATH = ($env.PATH | prepend "{bin_dir}")
+let child = (^$nu.current-exe -n -c 'source "{hook}"; ["vp -C ~/project passthrough en", `vp -C "~/project" passthrough en`, `vp node "~/project/entry-l`] | each {{ commandline complete }} | to json --raw' | complete)
+if $child.exit_code != 0 {{ error make {{ msg: $child.stderr }} }}
+print $child.stdout
+"#,
+        fake_home = fake_home.display(),
+        hook = nu_hook.display(),
+    )) {
+        assert!(stdout.contains("entry.js") && stdout.contains("entry-literal.js") && stdout.contains(r#"\"~/project/entry-literal.js\""#), "Nu -C fallback failed: {stdout}");
+    }
+
+    let pwsh_hook = sb.write_hook(ShellDialect::PowerShell, "fb_hook.ps1");
+    if let Some(stdout) = sb.run_pwsh(&format!(
+        r#"
+$ErrorActionPreference = 'Stop'
+$env:HOME = "{fake_home}"
+$env:USERPROFILE = "{fake_home}"
+$env:PATH = "{bin_dir}" + [IO.Path]::PathSeparator + $env:PATH
+$pwshExe = (Get-Process -Id $PID).Path
+& $pwshExe -NoLogo -NoProfile -NonInteractive -Command '. "{hook}"; $fb = (TabExpansion2 "vp -C ~/project passthrough en").CompletionMatches.CompletionText -join ","; Write-Output "PWSH_FB=$fb"; (TabExpansion2 "vp -C `"~/project`" passthrough en").CompletionMatches.CompletionText; (TabExpansion2 "vp node `"~/project/entry-l").CompletionMatches.CompletionText'
+"#,
+        fake_home = fake_home.display(),
+        hook = pwsh_hook.display(),
+    )) {
+        assert!(stdout.contains("PWSH_FB=entry.js") && stdout.contains("entry-literal.js") && stdout.contains("'~/project/entry-literal.js'"), "Pwsh -C fallback failed: {stdout}");
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn test_bash_interactive_pty_trailing_quotes() {
@@ -402,5 +1141,64 @@ cat "{log_file}"
                 "Bash interactive PTY trailing quote failed: expected {expected:?} in:\n{stdout}"
             );
         }
+    }
+}
+
+#[test]
+fn test_pwsh_smart_quotes_and_nu_unclosed_quoted_spaces() {
+    let sb = TestSandbox::new();
+    let bin_dir = sb.bin_dir.display();
+
+    // 1. PowerShell: smart-quoted candidate must not execute `$(...)` when evaluated as command arg
+    let smart_dir = sb.root.join("x\u{2019}$(Write-Output INJECTED)\u{2018}y");
+    if fs::create_dir_all(&smart_dir).is_ok() {
+        let pwsh_hook = sb.write_hook(ShellDialect::PowerShell, "smart_hook.ps1");
+        if let Some(stdout) = sb.run_pwsh(&format!(
+            r#"
+$ErrorActionPreference = 'Stop'
+$env:PATH = '{bin_dir}' + [IO.Path]::PathSeparator + $env:PATH
+. '{hook}'
+$m = @((TabExpansion2 'vp -C x').CompletionMatches.CompletionText)
+$target = $m | Where-Object {{ $_ -like '*Write-Output*' }} | Select-Object -First 1
+if (-not $target) {{ throw "Missing smart-quote candidate in: $($m -join ', ')" }}
+$evaled = Invoke-Expression "Write-Output $target"
+Write-Output "PWSH_EVAL=$evaled"
+"#,
+            hook = pwsh_hook.display(),
+        )) {
+            assert!(
+                !stdout.contains("PWSH_EVAL=INJECTED"),
+                "PowerShell smart quote executed injected subexpression: {stdout}"
+            );
+            assert!(
+                stdout.contains("PWSH_EVAL=x\u{2019}$(Write-Output INJECTED)\u{2018}y"),
+                "PowerShell smart quote did not preserve literal candidate: {stdout}"
+            );
+        }
+    }
+
+    // 2. Nushell: trailing space inside unclosed quote (`vp -C "configs `) and `--config="vit`
+    let spaced_cfg = sb.root.join("configs with space");
+    fs::create_dir_all(&spaced_cfg).unwrap();
+    fs::write(spaced_cfg.join("vite.config.ts"), "export default {}").unwrap();
+    fs::write(sb.root.join("vite.config.ts"), "export default {}").unwrap();
+    let nu_hook = sb.write_hook(ShellDialect::Nu, "unclosed_nu.nu");
+    if let Some(stdout) = sb.run_nu(&format!(
+        r#"
+$env.PATH = ($env.PATH | prepend '{bin_dir}')
+let child = (^$nu.current-exe -n -c 'source "{hook}"; print ("vp -C \"configs " | commandline complete | to json --raw); print ("vp dev --config=\"vit" | commandline complete | to json --raw)' | complete)
+if $child.exit_code != 0 {{ error make {{ msg: $child.stderr }} }}
+print $child.stdout
+"#,
+        hook = nu_hook.display(),
+    )) {
+        assert!(
+            stdout.contains("configs with space"),
+            "Nushell unclosed quote with space failed: {stdout}"
+        );
+        assert!(
+            stdout.contains("--config=vite.config.ts"),
+            "Nushell quoted attached flag failed: {stdout}"
+        );
     }
 }
