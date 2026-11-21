@@ -1,17 +1,84 @@
-//! Complete run tasks using the project's existing runtime or static configuration.
-use std::path::{Path, PathBuf};
+//! Shell autocompletion host integration powered by `vp_complete`.
+#![forbid(unsafe_code)]
 
-use vp_js_runtime::{JsRuntimeProvider, NodeProvider, Platform};
+use std::{
+    path::{Path, PathBuf},
+    process::ExitCode,
+};
 
+mod catalog;
+mod entry;
 mod providers;
 mod tasks;
 
-pub(crate) fn task_candidates(dir: &Path, prefix: &str) -> Vec<vp_complete::CompletionItem> {
-    tasks::get_task_candidates_with(dir, prefix, resolve_offline_node, resolve_offline_bin_js)
+use vp_complete::{
+    Argument, CompletionContext, CompletionDirective, CompletionItem, CompletionOutput,
+    CompletionRequest, EarlyCompletionOutcome, PathMode,
+};
+use vp_js_runtime::{JsRuntimeProvider, NodeProvider, Platform};
+
+/// Intercept `VP_COMPLETE` environment variable before Tokio runtime / self-setup runs.
+/// Returns `Some(ExitCode)` if completion was handled, or `None` if normal CLI execution should continue.
+pub(crate) fn try_handle_completion_early() -> Option<ExitCode> {
+    let dialect_var = std::env::var_os("VP_COMPLETE")?;
+    handle_completion_early_cold(&dialect_var)
+}
+
+#[cold]
+fn handle_completion_early_cold(dialect_var: &std::ffi::OsStr) -> Option<ExitCode> {
+    vp_shared::ensure_blocking_stdio();
+    match vp_complete::dispatch_early_completion(dialect_var, complete_entry) {
+        EarlyCompletionOutcome::ContinueCli => None,
+        EarlyCompletionOutcome::InvalidDialect => Some(ExitCode::FAILURE),
+        EarlyCompletionOutcome::Handled(output) => {
+            vp_shared::output::print_stdout(format_args!("{output}"));
+            Some(ExitCode::SUCCESS)
+        }
+    }
 }
 
 fn node_store_dir() -> PathBuf {
     vp_shared::EnvConfig::get().dirs.js_runtime().join("node").as_path().to_path_buf()
+}
+
+fn complete_entry(request: &CompletionRequest) -> CompletionOutput {
+    let root = entry::select_entry(request.words.first().map_or("", String::as_str));
+    vp_complete::complete(&root, request, &|command, arg, ctx| {
+        let name = command.name.as_str();
+        let top_level = ctx.parent == Some("vp") || ctx.parent.is_none();
+        let out = match arg {
+            Argument::Positional(_) if top_level && name == "run" && ctx.positional_index == 0 => {
+                complete_task(ctx)
+            }
+            Argument::Positional(_) if top_level && matches!(name, "run" | "exec") => {
+                ctx.complete_path(PathMode::Any)
+            }
+            Argument::Positional(_) if top_level && name == "help" && ctx.positional_index == 0 => {
+                CompletionOutput::new(
+                    root.subcommands
+                        .iter()
+                        .filter(|sub| !sub.hidden && sub.name.starts_with(&ctx.prefix))
+                        .map(|sub| CompletionItem::value(sub.name.clone(), sub.about.clone()))
+                        .collect(),
+                    CompletionDirective::NO_FILE_COMP,
+                )
+            }
+            _ => return None,
+        };
+        Some(out)
+    })
+}
+
+fn complete_task(ctx: &CompletionContext) -> CompletionOutput {
+    CompletionOutput::new(
+        tasks::get_task_candidates_with(
+            &ctx.cwd,
+            &ctx.prefix,
+            resolve_offline_node,
+            resolve_offline_bin_js,
+        ),
+        CompletionDirective::NO_FILE_COMP,
+    )
 }
 
 pub(crate) fn resolve_offline_node() -> Option<PathBuf> {
@@ -70,3 +137,6 @@ pub(crate) fn resolve_offline_bin_js(dir: &Path) -> Option<PathBuf> {
         .filter(|p| p.as_path().is_file())
         .map(|p| p.as_path().to_path_buf())
 }
+
+#[cfg(test)]
+mod spec_tests;

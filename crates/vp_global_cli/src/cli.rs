@@ -3,10 +3,9 @@
 //! This module defines the CLI structure using clap and routes commands
 //! to their appropriate handlers.
 
-use std::{collections::HashSet, ffi::OsStr, process::ExitStatus};
+use std::{collections::HashSet, process::ExitStatus};
 
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
-use clap_complete::ArgValueCompleter;
 use console::style;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 use vp_pm_cli::{ManagedGlobalCommand, PackageManagerCommand};
@@ -180,7 +179,7 @@ pub enum Commands {
     #[command(disable_help_flag = true)]
     Run {
         /// Additional arguments
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true, add = ArgValueCompleter::new(run_tasks_completions))]
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
 
@@ -600,17 +599,6 @@ fn should_suppress_header_for_subcommand(command: &str, args: &[String]) -> bool
         }
         _ => false,
     }
-}
-
-fn run_tasks_completions(current: &OsStr) -> Vec<clap_complete::CompletionCandidate> {
-    let Ok(cwd) = vt_path::current_dir() else { return Vec::new() };
-    crate::completion::task_candidates(cwd.as_path(), &current.to_string_lossy())
-        .into_iter()
-        .map(|item| {
-            clap_complete::CompletionCandidate::new(item.value)
-                .help(item.description.map(Into::into))
-        })
-        .collect()
 }
 
 /// Handle a parsed package-manager command.
@@ -1243,23 +1231,10 @@ fn maybe_print_runtime_header(command: &str, args: &[String], show_header: bool)
     print_runtime_header(show_header);
 }
 
-fn sanitize_subcommand_aliases_for_completion(cmd: &mut clap::Command) {
-    for subcmd in cmd.get_subcommands_mut() {
-        if subcmd.get_visible_aliases().next().is_some() {
-            let aliases: Vec<String> = subcmd.get_all_aliases().map(str::to_string).collect();
-            // Clear aliases and re-add them as hidden.
-            *subcmd = std::mem::take(subcmd).alias(None::<&str>).aliases(aliases);
-        }
-        sanitize_subcommand_aliases_for_completion(subcmd);
-    }
-}
-
-/// Build a completion command with hidden aliases so clap_complete's ID-based
-/// deduplication preserves canonical names.
-pub fn command_for_completion() -> clap::Command {
-    let mut cmd = Args::command();
-    sanitize_subcommand_aliases_for_completion(&mut cmd);
-    cmd
+/// Expose the raw clap Command for CLI parsing, help rendering, and completion CmdSpec.
+#[inline(never)]
+pub(crate) fn raw_cli_command() -> clap::Command {
+    Args::command()
 }
 
 /// Build a clap Command with custom help formatting matching the JS CLI output.
@@ -1269,7 +1244,7 @@ pub fn command_with_help() -> clap::Command {
 
 /// Build a clap Command with custom help formatting and rendering options.
 pub fn command_with_help_with_options(render_options: RenderOptions) -> clap::Command {
-    apply_custom_help(Args::command(), render_options)
+    apply_custom_help(raw_cli_command(), render_options)
 }
 
 /// Apply custom help formatting to a clap Command to match the JS CLI output.
@@ -1300,7 +1275,7 @@ pub fn try_parse_args_from_with_options(
     args: impl IntoIterator<Item = String>,
     render_options: RenderOptions,
 ) -> Result<Args, clap::error::Error> {
-    let cmd = apply_custom_help(Args::command(), render_options);
+    let cmd = apply_custom_help(raw_cli_command(), render_options);
     let argv: Vec<_> = args.into_iter().collect();
     let matches = cmd.try_get_matches_from(&argv)?;
     let mut parsed = Args::from_arg_matches(&matches)?;
@@ -1320,37 +1295,6 @@ mod tests {
 
     fn argv(args: &[&str]) -> Vec<String> {
         args.iter().map(|arg| (*arg).to_string()).collect()
-    }
-
-    #[test]
-    fn command_for_completion_preserves_canonical_subcommands() {
-        let mut cmd = super::command_for_completion();
-        for (parent, alias, name) in [
-            (None, "i", "install"),
-            (None, "up", "update"),
-            (None, "rm", "remove"),
-            (None, "un", "remove"),
-            (None, "uninstall", "remove"),
-            (Some("pm"), "ls", "list"),
-        ] {
-            let cmd = match parent {
-                Some(name) => cmd.find_subcommand_mut(name).unwrap(),
-                None => &mut cmd,
-            };
-            let candidates =
-                clap_complete::engine::complete(cmd, vec!["vp".into(), "".into()], 1, None)
-                    .unwrap();
-
-            assert!(
-                candidates.iter().any(|c| c.get_value() == name),
-                "missing {name}: {candidates:?}"
-            );
-            assert!(
-                !candidates.iter().any(|c| c.get_value() == alias),
-                "alias {alias} should be hidden from candidates: {candidates:?}"
-            );
-            assert_eq!(cmd.find_subcommand(alias).unwrap().get_name(), name);
-        }
     }
 
     #[test]
