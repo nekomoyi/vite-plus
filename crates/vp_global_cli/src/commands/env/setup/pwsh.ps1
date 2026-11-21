@@ -12,35 +12,17 @@ $env:PATH = @(
 Set-Alias vp (Join-Path $PSScriptRoot "vp.ps1")
 
 # Dynamic shell completion for PowerShell
-$env:VP_COMPLETE = "powershell"
-& (Join-Path $__vp_bin "vp") | Out-String | Invoke-Expression
-Remove-Item Env:\VP_COMPLETE -ErrorAction SilentlyContinue
-
-$__vpr_comp = {
-    param($wordToComplete, $commandAst, $cursorPosition)
-    $prev = $env:VP_COMPLETE
-    $env:VP_COMPLETE = "powershell"
-    $commandLine = $commandAst.Extent.Text
-    $args = $commandLine.Substring(0, [math]::Min($cursorPosition, $commandLine.Length))
-    if ($args -match '^(vpr\.exe|vpr)\b(\s+-C\s+(?:"[^"]*"|''[^'']*''|\S+))\s') {
-        $args = $args -replace '^(vpr\.exe|vpr)\b(\s+-C\s+(?:"[^"]*"|''[^'']*''|\S+))\s', 'vp$2 run '
-    } elseif ($args -match '^(vpr\.exe|vpr)\b(\s+-C=?(?:"[^"]*"|''[^'']*''|\S+))\s') {
-        $args = $args -replace '^(vpr\.exe|vpr)\b(\s+-C=?(?:"[^"]*"|''[^'']*''|\S+))\s', 'vp$2 run '
-    } elseif ($args -match '^(vpr\.exe|vpr)\b\s+-C') {
-        $args = $args -replace '^(vpr\.exe|vpr)\b', 'vp'
-    } else {
-        $args = $args -replace '^(vpr\.exe|vpr)\b', 'vp run'
+$__vp_exe = Join-Path $__vp_bin $(if ($env:OS -eq 'Windows_NT') { 'vp.exe' } else { 'vp' })
+if ([IO.File]::Exists($__vp_exe)) {
+    $__vp_prev_complete = $env:VP_COMPLETE
+    $__vp_prev_exit = $global:LASTEXITCODE
+    try {
+        $env:VP_COMPLETE = 'powershell'
+        (& $__vp_exe | Out-String) | Invoke-Expression
+    } finally {
+        $env:VP_COMPLETE = $__vp_prev_complete
+        $global:LASTEXITCODE = $__vp_prev_exit
     }
-    if ($wordToComplete -eq "") { $args += " ''" }
-    $results = Invoke-Expression @"
-& (Join-Path $__vp_bin 'vp') -- $args
-"@;
-    if ($prev) { $env:VP_COMPLETE = $prev } else { Remove-Item Env:\VP_COMPLETE }
-    $results | ForEach-Object {
-        $split = $_.Split("`t")
-        $cmd = $split[0];
-        if ($split.Length -eq 2) { $help = $split[1] } else { $help = $split[0] }
-        [System.Management.Automation.CompletionResult]::new($cmd, $cmd, 'ParameterValue', $help)
-    }
+    Remove-Variable __vp_prev_complete, __vp_prev_exit -ErrorAction SilentlyContinue
 }
-Register-ArgumentCompleter -Native -CommandName vpr -ScriptBlock $__vpr_comp
+Remove-Variable __vp_exe -ErrorAction SilentlyContinue

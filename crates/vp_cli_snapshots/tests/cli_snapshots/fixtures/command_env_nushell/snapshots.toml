@@ -36,10 +36,11 @@ steps = [
 name = "command_env_nushell_completer_input"
 vp = "global"
 skip-platforms = ["windows"]
-requires = ["nu", "fish"]
+requires = ["nu"]
 steps = [
   { argv = ["vp", "env", "setup", "--refresh"], envs = [["VP_HOME", "${workspace}/home"]], snapshot = false },
   { argv = ["vpt", "cp", "assert_completion.nu", "home/assert_completion.nu"], snapshot = false },
+  { argv = ["vpt", "write-file", "home/package.json", "{\n  \"name\": \"test-pkg\",\n  \"scripts\": {\n    \"build\": \"vite build\"\n  }\n}\n"], snapshot = false },
   { argv = ["nu", "assert_completion.nu"], cwd = "home", comment = "env.nu completers complete `vp` after a pipeline and do not use the positional input that Nushell 0.116 deprecates (#3127)", envs = [["VP_HOME", "${workspace}/home"]] },
 ]
 
@@ -51,5 +52,5 @@ requires = ["nu"]
 steps = [
   { argv = ["vp", "env", "setup", "--refresh"], envs = [["VP_HOME", "${workspace}/home"]], snapshot = false },
   { argv = ["vpt", "cp", "assert_without_fish.nu", "home/assert_without_fish.nu"], snapshot = false },
-  { argv = ["nu", "assert_without_fish.nu"], cwd = "home", comment = "without fish on PATH, env.nu completers return null so Nushell 0.116 falls back to file completion (#3272)", envs = [["VP_HOME", "${workspace}/home"]] },
+  { argv = ["nu", "assert_without_fish.nu"], cwd = "home", comment = "without fish on PATH, env.nu completers natively complete commands via vp_complete", envs = [["VP_HOME", "${workspace}/home"]] },
 ]

@@ -83,38 +83,14 @@ vp() {
 
 # Dynamic shell completion for bash/zsh
 if [ -n "${BASH_VERSION-}" ] && type complete >/dev/null 2>&1; then
-    eval "$(VP_COMPLETE=bash command vp)"
-elif [ -n "${ZSH_VERSION-}" ] && type compdef >/dev/null 2>&1; then
-    eval "$(VP_COMPLETE=zsh command vp)"
-    eval '
-    _vpr_complete() {
-        local -a orig=("${words[@]}")
-        if [[ "${orig[2]-}" == "-C" ]]; then
-            if (( ${#orig[@]} >= 4 )); then
-                words=("vp" "-C" "${orig[3]}" "run" "${orig[@]:3}")
-                if (( CURRENT >= 4 )); then
-                    CURRENT=$((CURRENT + 1))
-                fi
-            else
-                words=("vp" "${orig[@]:1}")
+    eval "$(VP_COMPLETE=bash command vp 2>/dev/null)"
+elif [ -n "${ZSH_VERSION-}" ]; then
+    case $- in
+        *i*) eval "$(VP_COMPLETE=zsh command vp 2>/dev/null)" ;;
+        *)
+            if type compdef >/dev/null 2>&1; then
+                eval "$(VP_COMPLETE=zsh command vp 2>/dev/null)"
             fi
-        elif [[ "${orig[2]-}" == -C?* ]]; then
-            if (( ${#orig[@]} >= 3 )); then
-                words=("vp" "${orig[2]}" "run" "${orig[@]:2}")
-                if (( CURRENT >= 3 )); then
-                    CURRENT=$((CURRENT + 1))
-                fi
-            else
-                words=("vp" "${orig[@]:1}")
-            fi
-        else
-            words=("vp" "run" "${orig[@]:1}")
-            if (( CURRENT >= 2 )); then
-                CURRENT=$((CURRENT + 1))
-            fi
-        fi
-        ${=_comps[vp]}
-    }
-    compdef _vpr_complete vpr
-    '
+            ;;
+    esac
 fi

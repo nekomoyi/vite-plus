@@ -834,36 +834,8 @@ pub(crate) async fn cleanup_legacy_windows_shim(bin_dir: &vt_path::AbsolutePath,
     }
 }
 
-// POSIX env file (bash/zsh)
-// When sourced multiple times, removes existing entries and re-prepends to front
-// Uses parameter expansion to preserve PATH entries containing spaces
-// Includes vp() shell function wrapper for `vp env use` (evals stdout)
-// Includes shell completion support
-const ENV_TEMPLATE_POSIX: &str = include_str!("setup/posix.sh");
-
-// Fish env file with vp wrapper function.
-// Every built-in that a user function can shadow carries `builtin`: fish runs a function before
-// the built-in with the same name, so a user `count` function would otherwise make `vp env use`
-// report success without setting VP_NODE_VERSION (#3128). The `vp` completion that clap_complete
-// registers calls bare `commandline`, as fish's own completions do, so this file cannot protect it.
-const ENV_TEMPLATE_FISH: &str = include_str!("setup/fish.fish");
-
-// Nushell env file with vp wrapper function.
-// Completions delegate to Fish dynamically (VP_COMPLETE=fish) because clap_complete_nushell
-// generates multiple rest params (e.g. for `vp install`), which Nushell does not support.
-// Every shadowable built-in carries the `%` sigil: Nushell resolves names at parse time, and
-// env.nu is parsed after the user's config, so a user `def update []` would otherwise replace
-// the built-in and stop Nushell at startup. `NuSyntax::Legacy` strips the sigils.
-const ENV_TEMPLATE_NU: &str = include_str!("setup/nu.nu");
-
-const ENV_TEMPLATE_PS1: &str = include_str!("setup/pwsh.ps1");
-
-// Keep the wrapper outside bin so it cannot shadow the native executable.
-// Unlike an advanced function, this script forwards all arguments without
-// PowerShell consuming common parameters such as -Verbose or its -V alias.
-// Bare -- recovery is inspired by mise's __mise_restore_double_dash:
-// https://github.com/jdx/mise/blob/34ec0439c868379be87a28591f50d41f84fb8d02/src/shell/pwsh.rs#L45-L103
-const VP_WRAPPER_PS1: &str = include_str!("setup/vp_wrapper.ps1");
+// Shell environment templates (`env`, `env.fish`, `env.nu`, `env.ps1`, `vp.ps1`)
+// live under `setup/` and are embedded via `include_str!`.
 
 // cmd.exe wrapper for `vp env use` (cmd.exe cannot define shell functions).
 // Users run `vp-use 24` in cmd.exe instead of `vp env use 24`.
@@ -961,20 +933,26 @@ pub(crate) fn escape_powershell_single_quoted_string(value: &str) -> String {
 /// Render export lines for the persisted layout values in
 /// [`EnvConfig::dir_envs`]. The map contains only an explicit absolute
 /// `VP_HOME`. Sort the lines to keep the output stable.
+#[cold]
+#[inline(never)]
 fn render_dir_envs(shell: EnvShell, config: &vp_shared::EnvConfig, nu_syntax: NuSyntax) -> String {
+    use std::fmt::Write as _;
     let home_dir = config.user_home.as_path();
-    let mut exports: Vec<_> = config.dir_envs.iter().collect();
-    exports.sort_unstable_by_key(|(name, _)| *name);
-    exports
-        .into_iter()
-        .map(|(name, value)| match shell {
+    let mut exports = Vec::with_capacity(config.dir_envs.len());
+    for (k, v) in &config.dir_envs {
+        exports.push((k, v));
+    }
+    exports.sort_by(|a, b| a.0.cmp(b.0));
+    let mut out = String::new();
+    for (name, value) in exports {
+        match shell {
             EnvShell::Posix => {
                 let path_ref = render_home_relative_path(std::path::Path::new(value), home_dir);
                 let escaped = escape_home_relative_double_quoted_path(
                     &path_ref,
                     escape_posix_double_quoted_string,
                 );
-                format!("export {name}=\"{escaped}\"\n")
+                let _ = writeln!(out, "export {name}=\"{escaped}\"");
             }
             EnvShell::Fish => {
                 let path_ref = render_home_relative_path(std::path::Path::new(value), home_dir);
@@ -982,32 +960,36 @@ fn render_dir_envs(shell: EnvShell, config: &vp_shared::EnvConfig, nu_syntax: Nu
                     &path_ref,
                     escape_fish_double_quoted_string,
                 );
-                format!("set -gx {name} \"{escaped}\"\n")
+                let _ = writeln!(out, "set -gx {name} \"{escaped}\"");
             }
             EnvShell::Nu => {
                 let path_ref = render_nu_path_ref(&render_home_relative_path(
                     std::path::Path::new(value),
                     home_dir,
                 ));
-                format!(
-                    "$env.{name} = (\"{}\" | {}path expand --no-symlink)\n",
+                let _ = writeln!(
+                    out,
+                    "$env.{name} = (\"{}\" | {}path expand --no-symlink)",
                     escape_nu_double_quoted_string(&path_ref),
                     nu_syntax.builtin_prefix()
-                )
+                );
             }
             // PowerShell uses the actual absolute path (not $HOME-relative)
             EnvShell::Powershell => {
                 let escaped = escape_powershell_single_quoted_string(value);
-                format!("$env:{name} = '{escaped}'\n")
+                let _ = writeln!(out, "$env:{name} = '{escaped}'");
             }
-        })
-        .collect()
+        }
+    }
+    out
 }
 
 /// Render the environment-file content for `shell` and the resolved config.
 ///
 /// Put the resolved bin directory on `PATH`. Persist an explicit `VP_HOME`, but
 /// do not export the internal split-directory group.
+#[cold]
+#[inline(never)]
 fn render_env_content(
     shell: EnvShell,
     config: &vp_shared::EnvConfig,
@@ -1029,7 +1011,7 @@ fn render_env_content(
                 &fallback_path_ref,
                 escape_posix_double_quoted_string,
             );
-            ENV_TEMPLATE_POSIX
+            include_str!("setup/posix.sh")
                 .replace("__VP_FALLBACK_BIN__", &fallback_path_ref)
                 .replace("__ENV_EXPORTS__", &dir_envs)
                 .replace("__VP_BIN__", &bin_path_ref)
@@ -1043,7 +1025,7 @@ fn render_env_content(
                 &fallback_path_ref,
                 escape_fish_double_quoted_string,
             );
-            ENV_TEMPLATE_FISH
+            include_str!("setup/fish.fish")
                 .replace("__VP_FALLBACK_BIN__", &fallback_path_ref)
                 .replace("__ENV_EXPORTS__", &dir_envs)
                 .replace("__VP_BIN__", &bin_path_ref)
@@ -1053,21 +1035,26 @@ fn render_env_content(
             // expanded at parse time, so PATH entries would contain a literal "$HOME/...".
             let bin_path_ref_nu =
                 escape_nu_double_quoted_string(&render_nu_path_ref(&bin_path_ref));
-            // Strip the sigils before substitution: paths can contain `%`.
-            ENV_TEMPLATE_NU
+            // Strip the sigils before path substitution: paths can contain `%`.
+            let mut script = include_str!("setup/nu.nu")
                 .replace('%', nu_syntax.builtin_prefix())
                 .replace(
                     "__VP_FALLBACK_BIN__",
                     &escape_nu_double_quoted_string(&render_nu_path_ref(&fallback_path_ref)),
                 )
                 .replace("__ENV_EXPORTS__", &dir_envs)
-                .replace("__VP_BIN__", &bin_path_ref_nu)
+                .replace("__VP_BIN__", &bin_path_ref_nu);
+            script.push_str(&vp_complete::shells::nu::render_installed_hook(
+                nu_syntax.builtin_prefix(),
+                &bin_path_ref_nu,
+            ));
+            script
         }
         EnvShell::Powershell => {
             // PowerShell uses the actual absolute path (not $HOME-relative)
             let bin_path_win =
                 escape_powershell_single_quoted_string(&dirs.bin.as_path().display().to_string());
-            ENV_TEMPLATE_PS1
+            include_str!("setup/pwsh.ps1")
                 .replace(
                     "__VP_FALLBACK_BIN_WIN__",
                     &escape_powershell_single_quoted_string(&dirs.fallback_bin().to_string()),
@@ -1077,6 +1064,8 @@ fn render_env_content(
         }
     }
 }
+
+const VP_WRAPPER_PS1: &str = include_str!("setup/vp_wrapper.ps1");
 
 /// Create environment files under `<CONFIG>/`. Add a guard that prevents
 /// duplicate `PATH` entries.
@@ -1153,7 +1142,7 @@ fn has_configured_profile(config: &vp_shared::EnvConfig) -> bool {
             arguments.push(format!("'{}'", render_nu_path_ref(&home_relative)));
         }
         for line in content.lines() {
-            let line = line.trim_start();
+            let line = line.strip_prefix('\u{feff}').unwrap_or(line).trim_start();
             let Some(argument) = line.strip_prefix(". ").or_else(|| line.strip_prefix("source "))
             else {
                 continue;
@@ -1682,19 +1671,16 @@ mod tests {
             |_| {
                 let config = vp_shared::EnvConfig::get();
                 let sigil = render_env_content(EnvShell::Nu, &config, NuSyntax::BuiltinSigil);
-                assert!(sigil.contains("| %update value {|row|"), "got: {sigil}");
                 assert!(sigil.contains(r#"("/tmp/vp%home" | %path expand"#), "got: {sigil}");
-                assert!(sigil.contains("^fish --command"), "got: {sigil}");
                 // Completers must not cause the Nushell 0.116 positional-input warning (#3127).
                 assert!(sigil.contains(r#"def "nu-complete vp" [buffer: string, place: any]"#));
-                assert!(sigil.contains(r#"def "nu-complete vpr" [buffer: string, place: any]"#));
+                assert!(sigil.contains(r#"%with-env { VP_COMPLETE: "nu""#), "got: {sigil}");
                 assert!(!sigil.contains("[context"), "got: {sigil}");
+                assert!(!sigil.contains("^fish --command"), "got: {sigil}");
 
                 let legacy = render_env_content(EnvShell::Nu, &config, NuSyntax::Legacy);
-                assert!(legacy.contains("| update value {|row|"), "got: {legacy}");
-                assert!(legacy.contains("^fish --command"), "got: {legacy}");
-                // CI runs only a newer Nushell, so check the legacy fish guard here (#3272).
-                assert!(legacy.contains("if (which fish | is-empty) { return null }"));
+                assert!(legacy.contains(r#"with-env { VP_COMPLETE: "nu""#), "got: {legacy}");
+                assert!(!legacy.contains("^fish --command"), "got: {legacy}");
                 assert_eq!(
                     legacy.replace("/tmp/vp%home", "").matches('%').count(),
                     0,
@@ -1726,8 +1712,8 @@ mod tests {
             "env.nu should set VP_ENV_USE_EVAL_ENABLE"
         );
         assert!(
-            nu_content.contains("VP_COMPLETE=fish"),
-            "env.nu should use dynamic Fish completion delegation"
+            nu_content.contains(r#"VP_COMPLETE: "nu""#),
+            "env.nu should use native Nushell completion"
         );
         assert!(nu_content.contains("load-env"), "env.nu should use load-env to apply exports");
     })
@@ -2536,37 +2522,34 @@ mod tests {
 
                 let env_content = tokio::fs::read_to_string(home.join("env")).await.unwrap();
                 let fish_content = tokio::fs::read_to_string(home.join("env.fish")).await.unwrap();
+                let nu_content = tokio::fs::read_to_string(home.join("env.nu")).await.unwrap();
                 let ps1_content = tokio::fs::read_to_string(home.join("env.ps1")).await.unwrap();
 
                 assert!(
-                    env_content.contains("VP_COMPLETE=bash")
-                        && env_content.contains("VP_COMPLETE=zsh"),
-                    "env file should contain completion for bash and zsh"
+                    env_content.contains("VP_COMPLETE=bash command vp")
+                        && env_content.contains("VP_COMPLETE=zsh command vp")
+                        && !env_content.contains("_vp_complete()"),
+                    "env file should dynamically evaluate bash and zsh completions via VP_COMPLETE"
                 );
                 assert!(
-                    fish_content.contains("VP_COMPLETE=fish"),
-                    "env.fish file should contain completion for fish"
+                    fish_content.contains("VP_COMPLETE=fish command vp")
+                        && fish_content.contains("| builtin source")
+                        && !fish_content.contains("function __vp_complete"),
+                    "env.fish should dynamically source fish completions via builtin source"
                 );
                 assert!(
-                    ps1_content.contains("VP_COMPLETE = \"powershell\""),
-                    "env.ps1 file should contain completion for PowerShell"
-                );
-
-                assert!(
-                    env_content.contains("compdef _vpr_complete vpr"),
-                    "env should have vpr completion for zsh"
-                );
-                assert!(
-                    env_content.contains("eval '") && env_content.contains("_vpr_complete() {"),
-                    "env should wrap zsh-specific code in eval"
+                    nu_content.contains("nu-complete vp")
+                        && nu_content
+                            .contains(r#"export extern "vpr" [...args: string@"nu-complete vp"]"#)
+                        && nu_content
+                            .contains(r#"export extern "vpx" [...args: string@"nu-complete vp"]"#),
+                    "env.nu should export vpr and vpx completions"
                 );
                 assert!(
-                    fish_content.contains("complete -c vpr"),
-                    "env.fish should have vpr completion"
-                );
-                assert!(
-                    ps1_content.contains("Register-ArgumentCompleter -Native -CommandName vpr"),
-                    "env.ps1 should have vpr completion"
+                    ps1_content.contains("$env:VP_COMPLETE = 'powershell'")
+                        && ps1_content.contains("(& $__vp_exe | Out-String) | Invoke-Expression")
+                        && !ps1_content.contains("function global:TabExpansion2"),
+                    "env.ps1 should dynamically load PowerShell completions from $__vp_exe"
                 );
             },
         )
@@ -2584,12 +2567,13 @@ mod tests {
             let ps1_content =
                 render_env_content(EnvShell::Powershell, &config, NuSyntax::BuiltinSigil);
 
-            assert!(posix_content.contains("if (( CURRENT >= 4 )); then"));
-            assert!(posix_content.contains("if (( CURRENT >= 3 )); then"));
-            assert!(nu_content.contains(r#"-C=?(?:"[^"]*"|\x27[^\x27]*\x27|\S+)"#));
-            assert!(VP_WRAPPER_PS1.contains(r#""$($args[0])" -like "-C?*""#));
+            assert!(posix_content.contains("VP_COMPLETE=zsh command vp"));
+            assert!(
+                nu_content.contains(r#"export extern "vpr" [...args: string@"nu-complete vp"]"#)
+            );
+            assert!(VP_WRAPPER_PS1.contains(r#""$($args[0])" -clike "-C?*""#));
             assert!(!VP_WRAPPER_PS1.contains("$args[0].StartsWith"));
-            assert!(ps1_content.contains(r#"-C=?(?:"[^"]*"|''[^'']*''|\S+)"#));
+            assert!(ps1_content.contains("$env:VP_COMPLETE = 'powershell'"));
         });
     }
 
@@ -2734,15 +2718,28 @@ echo ok
         let home = AbsolutePathBuf::new(temp_dir.path().to_path_buf()).unwrap();
         let bin_dir = home.join("bin");
         std::fs::create_dir_all(&bin_dir).unwrap();
+        let capture_log = temp_dir.path().join("capture.log");
         let fake_vp = bin_dir.join("vp");
+        let hook_file = temp_dir.path().join("zsh_hook.zsh");
+        std::fs::write(
+            &hook_file,
+            vp_complete::ShellDialect::Zsh.adapter().render_hook_with_exe(Some(fake_vp.as_path())),
+        )
+        .unwrap();
         std::fs::write(
             &fake_vp,
-            "#!/bin/sh\nif [ -n \"$VP_COMPLETE\" ]; then exit 0; fi\nexit 88\n",
+            format!(
+                "#!/bin/sh\nif [ -n \"$VP_COMPLETE\" ]; then\n  if [ \"${{1-}}\" != \"--\" ]; then cat \"{}\"; exit 0; fi\n  echo \"$VP_COMPLETE|$_VP_COMPLETE_INDEX|$*\" >> \"{}\"; exit 0\nfi\nexit 88\n",
+                hook_file.display(),
+                capture_log.display()
+            ),
         )
         .unwrap();
         let mut permissions = std::fs::metadata(&fake_vp).unwrap().permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(&fake_vp, permissions).unwrap();
+        std::os::unix::fs::symlink(&fake_vp, bin_dir.join("vpr")).unwrap();
+        std::os::unix::fs::symlink(&fake_vp, bin_dir.join("vpx")).unwrap();
 
         vp_shared::EnvConfig::with_vars(test_env_vars(temp_dir.path(), temp_dir.path()), |_| {
             let env_file = home.join("env");
@@ -2760,23 +2757,23 @@ echo ok
                 .arg("-c")
                 .arg(
                     r#"compdef() { : }
-typeset -A _comps
-capture() { print -r -- "$CURRENT|${words[1]}|${words[2]-}|${words[3]-}|${words[4]-}|${words[5]-}" }
-_comps[vp]=capture
+_describe() { : }
+_files() { : }
 . "$1"
+rehash
 words=(vpr -C "" build)
 CURRENT=3
-_vpr_complete
+_vp_complete
 words=(vpr -C dir build)
 CURRENT=4
-_vpr_complete
+_vp_complete
 words=(vpr -Cdir build)
 CURRENT=2
-_vpr_complete
+_vp_complete
 setopt no_unset
 words=(vpr)
 CURRENT=1
-_vpr_complete
+_vp_complete
 "#,
                 )
                 .arg("test-zsh-vpr-completion")
@@ -2784,10 +2781,15 @@ _vpr_complete
                 .env("HOME", temp_dir.path())
                 .output()
                 .unwrap();
-            assert!(output.status.success(), "zsh completion script should run");
+            assert!(
+                output.status.success(),
+                "zsh completion script should run: stderr={}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let captured = std::fs::read_to_string(&capture_log).unwrap();
             assert_eq!(
-                String::from_utf8(output.stdout).unwrap(),
-                "3|vp|-C||run|build\n5|vp|-C|dir|run|build\n2|vp|-Cdir|run|build|\n1|vp|run|||\n"
+                captured,
+                "zsh|2|-- vpr -C \nzsh|3|-- vpr -C dir build\nzsh|1|-- vpr -Cdir\nzsh|0|-- vpr\n"
             );
         });
     }

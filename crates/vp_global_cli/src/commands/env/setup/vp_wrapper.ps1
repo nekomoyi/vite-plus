@@ -44,15 +44,15 @@ if ($__vp_command) {
 }
 $__vp_command_index = 0
 if ($args.Count -ge 1) {
-    if ($args[0] -eq "-C") {
+    if ($args[0] -ceq "-C") {
         $__vp_command_index = 2
-    } elseif ("$($args[0])" -like "-C?*") {
+    } elseif ("$($args[0])" -clike "-C?*") {
         $__vp_command_index = 1
     }
 }
 # Intercept `vp env use` to set/unset VP_NODE_VERSION in the current session.
-if ($args.Count -ge ($__vp_command_index + 2) -and $args[$__vp_command_index] -eq "env" -and $args[$__vp_command_index + 1] -eq "use") {
-    if ($args -contains "-h" -or $args -contains "--help") {
+if ($args.Count -ge ($__vp_command_index + 2) -and $args[$__vp_command_index] -ceq "env" -and $args[$__vp_command_index + 1] -ceq "use") {
+    if ($args -ccontains "-h" -or $args -ccontains "--help") {
         & (Join-Path $__vp_bin "vp") @args
         exit $LASTEXITCODE
     }
