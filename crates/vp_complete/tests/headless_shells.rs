@@ -104,6 +104,11 @@ impl TestSandbox {
         let zsh = Path::new("/bin/zsh");
         zsh.exists().then(|| self.run_cmd(zsh, &["-f", "-c", script], "zsh"))
     }
+
+    fn run_fish(&self, script: &str) -> Option<String> {
+        let fish = find_bin("fish", &["/opt/homebrew/bin/fish", "/usr/local/bin/fish"])?;
+        Some(self.run_cmd(&fish, &["-c", script], "fish"))
+    }
 }
 
 #[test]
@@ -183,6 +188,33 @@ run_test "vp run build:wa" "build:watch"
     assert!(
         stdout.contains("build:watch"),
         "Zsh must complete build:watch without colon splitting: {stdout}"
+    );
+}
+
+#[test]
+fn test_headless_fish() {
+    let sb = TestSandbox::new();
+    let script = format!(
+        r#"
+set -gx PATH "{bin_dir}" $PATH
+{hook}
+echo "=== UN ==="
+complete -C "vp un"
+echo "=== BUILD ==="
+complete -C "vp run build:"
+"#,
+        bin_dir = sb.bin_dir.display(),
+        hook = ShellDialect::Fish.adapter().render_hook(),
+    );
+
+    let Some(stdout) = sb.run_fish(&script) else { return };
+    assert!(
+        stdout.contains("uninstall") && stdout.contains("unlink") && stdout.contains("un"),
+        "Fish must complete 'un' aliases: {stdout}"
+    );
+    assert!(
+        stdout.contains("build:watch") && stdout.contains("build:*"),
+        "Fish must complete build tasks: {stdout}"
     );
 }
 

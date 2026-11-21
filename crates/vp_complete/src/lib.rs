@@ -18,7 +18,8 @@ pub use engine::{Argument, ValueProvider, complete};
 pub use lexer::{BashLexResult, BashQuoteMode, parse_bash_line, parse_bash_line_with_wordbreaks};
 pub use path::{PathMode, complete_path};
 pub use shells::{
-    BashAdapter, ParseDialectError, ShellAdapter, ShellDialect, ShellInputMode, ZshAdapter,
+    BashAdapter, FishAdapter, ParseDialectError, ShellAdapter, ShellDialect, ShellInputMode,
+    ZshAdapter,
 };
 pub use spec::{
     CmdSpec, CompletionContext, CompletionDirective, CompletionItem, CompletionOutput,

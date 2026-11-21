@@ -1,17 +1,22 @@
 pub mod bash;
+pub mod fish;
 pub mod zsh;
 
 use std::{ffi::OsString, fmt, path::Path, str::FromStr};
 
 pub use bash::BashAdapter;
+pub use fish::FishAdapter;
 pub use zsh::ZshAdapter;
 
-use crate::{CompletionOutput, CompletionRequest, path::PathMode};
+use crate::{
+    CompletionDirective, CompletionItem, CompletionOutput, CompletionRequest, path::PathMode,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShellDialect {
     Bash,
     Zsh,
+    Fish,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +37,7 @@ impl FromStr for ShellDialect {
         match s.to_ascii_lowercase().as_str() {
             "bash" => Ok(Self::Bash),
             "zsh" => Ok(Self::Zsh),
+            "fish" => Ok(Self::Fish),
             _ => Err(ParseDialectError(s.to_string())),
         }
     }
@@ -42,6 +48,7 @@ impl fmt::Display for ShellDialect {
         f.write_str(match self {
             Self::Bash => "bash",
             Self::Zsh => "zsh",
+            Self::Fish => "fish",
         })
     }
 }
@@ -78,6 +85,7 @@ impl ShellDialect {
         match self {
             Self::Bash => &BashAdapter,
             Self::Zsh => &ZshAdapter,
+            Self::Fish => &FishAdapter,
         }
     }
 }
@@ -147,6 +155,21 @@ fn complete_fallback_paths(cwd: &Path, prefix: &str, literal: bool) -> Completio
             PathMode::Any,
             !literal,
         )
+    }
+}
+
+pub(crate) fn items_or_file_fallback<'a>(
+    out: &'a CompletionOutput,
+    req: &CompletionRequest,
+    fallback_buf: &'a mut Vec<CompletionItem>,
+) -> &'a [CompletionItem] {
+    if out.items.is_empty() && !out.directive.contains(CompletionDirective::NO_FILE_COMP) {
+        let prefix = req.words.get(req.current_index).map_or("", String::as_str);
+        *fallback_buf =
+            complete_fallback_paths(out.cwd_or(&req.cwd), prefix, req.literal_tilde).items;
+        fallback_buf
+    } else {
+        &out.items
     }
 }
 

@@ -17,6 +17,7 @@ fn test_shell_dialect_parsing() {
     assert_eq!("BASH".parse::<ShellDialect>().unwrap(), ShellDialect::Bash);
     assert_eq!("zsh".parse::<ShellDialect>().unwrap(), ShellDialect::Zsh);
     assert_eq!("Zsh".parse::<ShellDialect>().unwrap(), ShellDialect::Zsh);
+    assert_eq!("fish".parse::<ShellDialect>().unwrap(), ShellDialect::Fish);
 
     assert!("unknown_shell".parse::<ShellDialect>().is_err());
 }
@@ -158,6 +159,30 @@ fn test_zsh_adapter_parse_input_padding() {
 }
 
 #[test]
+fn test_fish_adapter_tsv_output() {
+    let adapter = ShellDialect::Fish.adapter();
+    let req = CompletionRequest::new(
+        vec!["vp".into(), "run".into(), "b".into()],
+        2,
+        PathBuf::from("/workspace"),
+    );
+    let env = |_k: &str| None;
+    let out = CompletionOutput::new(
+        vec![
+            CompletionItem::value("build:watch", Some("Build and watch")),
+            CompletionItem::value("build", None::<String>),
+        ],
+        CompletionDirective::DEFAULT,
+    );
+
+    let rendered = adapter.render_output(&req, &env, &out);
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert_eq!(lines[0], "build:watch\tBuild and watch");
+    assert_eq!(lines[1], "build");
+    assert_eq!(lines.len(), 2, "Fish does NOT emit trailing :directive line");
+}
+
+#[test]
 fn test_shell_adapter_snapshots() {
     let req = CompletionRequest::new(
         vec!["vp".into(), "run".into(), "build:wa".into()],
@@ -187,6 +212,39 @@ fn test_shell_adapter_snapshots() {
 
     let zsh_out = ShellDialect::Zsh.adapter().render_output(&req, &env, &out);
     insta::assert_snapshot!("zsh_adapter_rendered_output", zsh_out);
+
+    let fish_out = ShellDialect::Fish.adapter().render_output(&req, &env, &out);
+    insta::assert_snapshot!("fish_adapter_rendered_output", fish_out);
+}
+
+#[test]
+fn test_fish_hook_hardened_builtins() {
+    let hook = ShellDialect::Fish.adapter().render_hook();
+    assert!(
+        hook.contains("builtin commandline -opc"),
+        "Fish hook must use 'builtin commandline -opc'"
+    );
+    assert!(
+        hook.contains("builtin commandline -ct"),
+        "Fish hook must use 'builtin commandline -ct'"
+    );
+    assert!(hook.contains("builtin count $tokens"), "Fish hook must use 'builtin count $tokens'");
+    assert!(
+        hook.contains("command \"$bin\""),
+        "Fish hook must invoke binary using 'command \"$bin\"'"
+    );
+    assert!(
+        hook.contains("builtin complete -c vp --keep-order"),
+        "Fish hook must use 'builtin complete -c vp --keep-order'"
+    );
+    assert!(
+        hook.contains("builtin complete -c vpr --keep-order"),
+        "Fish hook must use 'builtin complete -c vpr --keep-order'"
+    );
+    assert!(
+        hook.contains("builtin complete -c vpx --keep-order"),
+        "Fish hook must use 'builtin complete -c vpx --keep-order'"
+    );
 }
 
 #[test]
