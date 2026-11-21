@@ -1,0 +1,20 @@
+---
+source: crates/vp_complete/tests/engine_snapshots.rs
+expression: lex_result
+---
+BashLexResult {
+    words: [
+        "vp",
+        "run",
+        "build:wa",
+    ],
+    current_index: 2,
+    cursor: BashCursor {
+        quote_mode: None,
+        has_closing_quote: false,
+        last_unescaped_wordbreak_end: Some(
+            6,
+        ),
+        literal_tilde: false,
+    },
+}

@@ -9,7 +9,7 @@ use std::{fs, path::PathBuf};
 use tempfile::TempDir;
 use vp_complete::{
     CmdSpec, CompletionDirective, CompletionItem, CompletionOutput, CompletionRequest, FlagSpec,
-    ItemKind, PathMode, PositionalSpec, ValueHint, complete_path,
+    ItemKind, PathMode, PositionalSpec, ValueHint, complete_path, parse_bash_line,
 };
 
 fn complete(root: &CmdSpec, req: &CompletionRequest) -> CompletionOutput {
@@ -119,6 +119,37 @@ fn test_chdir_flag_effective_cwd() {
         )]))
     });
     assert_eq!(out.items[0].value, req.cwd.join("subpkg").display().to_string());
+}
+
+#[test]
+fn test_bash_lexer() {
+    // (1) POSIX shlex segment reset on &&
+    let res = parse_bash_line("echo hi && vp run build:wa", 26);
+    assert_eq!(res.words, vec!["vp", "run", "build:wa"]);
+    assert_eq!(res.current_index, 2);
+
+    // (2) Trailing whitespace creates an empty candidate at current_index
+    let res_space = parse_bash_line("vp run ", 7);
+    assert_eq!(res_space.words, vec!["vp", "run", ""]);
+    assert_eq!(res_space.current_index, 2);
+
+    // (3) Quotes and escape sequences
+    let res_quotes = parse_bash_line("vp run \"build with\\\"quote\" 'single quote'", 41);
+    assert_eq!(res_quotes.words, vec!["vp", "run", "build with\"quote", "single quote"]);
+
+    // (4) Other pipeline and command separators: |, ;, ||
+    let res_pipe = parse_bash_line("cat file | vp install", 21);
+    assert_eq!(res_pipe.words, vec!["vp", "install"]);
+    assert_eq!(res_pipe.current_index, 1);
+
+    // (5) Multi-line input and newlines resetting words
+    let res_nl = parse_bash_line("echo hi\nvp un", 13);
+    assert_eq!(res_nl.words, vec!["vp", "un"]);
+    assert_eq!(res_nl.current_index, 1);
+
+    let res_nu_block = parse_bash_line("do {\n  let x = 1\n  vpr ", 23);
+    assert_eq!(res_nu_block.words, vec!["vpr", ""]);
+    assert_eq!(res_nu_block.current_index, 1);
 }
 
 #[test]
@@ -291,6 +322,10 @@ fn test_engine_snapshots() {
     let req_flags = CompletionRequest::new(vec!["vp".into(), "-".into()], 1, cwd.clone());
     let out_flags = complete(&root, &req_flags);
     insta::assert_debug_snapshot!("flag_suggestions", out_flags);
+
+    // Bash lexer snapshot
+    let lex_result = parse_bash_line("echo hi && vp run build:wa", 26);
+    insta::assert_debug_snapshot!("bash_lexer_compound_line", lex_result);
 }
 
 #[test]
@@ -573,6 +608,85 @@ fn test_word_zero_does_not_panic() {
         assert!(out.items.is_empty(), "Completing word 0 must not panic or emit subcommands");
         assert_eq!(out.directive, CompletionDirective::DEFAULT);
     }
+}
+
+#[test]
+fn test_tilde_chdir_resolution() {
+    if std::env::var_os("_VP_TEST_TILDE_SUBPROC").is_none() {
+        let temp = TempDir::new().unwrap();
+        let fake_home = temp.path().join("home");
+        fs::create_dir_all(fake_home.join("project")).unwrap();
+        fs::write(fake_home.join("project/entry.js"), "console.log(1);\n").unwrap();
+        let other_cwd = temp.path().join("other");
+        fs::create_dir_all(&other_cwd).unwrap();
+
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "test_tilde_chdir_resolution", "--nocapture"])
+            .env("_VP_TEST_TILDE_SUBPROC", "1")
+            .env("_VP_TEST_OTHER_CWD", &other_cwd)
+            .env("HOME", &fake_home)
+            .env("USERPROFILE", &fake_home)
+            .status()
+            .unwrap();
+        assert!(status.success(), "Subprocess tilde chdir test failed");
+        return;
+    }
+
+    let other_cwd = PathBuf::from(std::env::var_os("_VP_TEST_OTHER_CWD").unwrap());
+    let root = CmdSpec::new("vp")
+        .flag(
+            FlagSpec::new()
+                .short('C')
+                .long("dir")
+                .takes_value(true)
+                .chdir(true)
+                .global(true)
+                .value_hint(ValueHint::DirPath),
+        )
+        .subcommand(
+            CmdSpec::new("node")
+                .positional(PositionalSpec::new("script").value_hint(ValueHint::AnyPath)),
+        );
+
+    let fake_home = PathBuf::from(std::env::var_os("HOME").unwrap());
+    let home_proj_slash = format!("{}/project/", fake_home.display());
+
+    let bash_request = |line: &str| {
+        let lex = parse_bash_line(line, line.len());
+        CompletionRequest::new(lex.words, lex.current_index, other_cwd.clone())
+    };
+    let out = complete(&root, &bash_request("vp -C ~/project node en"));
+    assert_eq!(out.items[0].value, "entry.js");
+
+    // Attached `-C~/proj`, `-C=~/proj`, `--dir=~/proj` emit expanded executable paths
+    for (token, expected) in [
+        ("-C~", format!("-C{}/", fake_home.display())),
+        ("-C~/proj", format!("-C{home_proj_slash}")),
+        ("-C=~/proj", format!("-C={home_proj_slash}")),
+        ("--dir=~/proj", format!("--dir={home_proj_slash}")),
+    ] {
+        let out = complete(
+            &root,
+            &CompletionRequest::new(vec!["vp".into(), token.into()], 1, other_cwd.clone()),
+        );
+        let vals: Vec<&str> = out.items.iter().map(|i| i.value.as_str()).collect();
+        assert_eq!(vals, vec![expected.as_str()], "Attached tilde completion failed for {token}");
+    }
+
+    // Unexpanded attached `-C~/project` resolves literally against cwd (matching apply_chdir)
+    let out_literal_attached = complete(
+        &root,
+        &CompletionRequest::new(
+            vec!["vp".into(), "-C~/project".into(), "node".into(), "en".into()],
+            3,
+            other_cwd.clone(),
+        ),
+    );
+    assert!(out_literal_attached.items.is_empty());
+
+    let out_home_root = complete(&root, &bash_request("vp -C ~ node proj"));
+    let home_vals: Vec<&str> = out_home_root.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(home_vals, vec!["project/"]);
 }
 
 #[test]

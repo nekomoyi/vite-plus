@@ -69,12 +69,13 @@ pub struct CompletionRequest {
     pub words: Vec<String>,
     pub current_index: usize,
     pub literal_tilde: bool,
+    pub(crate) bash_cursor: Option<crate::lexer::BashCursor>,
     pub cwd: PathBuf,
 }
 
 impl CompletionRequest {
     pub fn new(words: Vec<String>, current_index: usize, cwd: PathBuf) -> Self {
-        Self { words, current_index, cwd, literal_tilde: false }
+        Self { words, current_index, cwd, literal_tilde: false, bash_cursor: None }
     }
 }
 

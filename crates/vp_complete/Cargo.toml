@@ -15,6 +15,10 @@ bitflags = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
 
+[[example]]
+name = "mock_vp"
+path = "examples/mock_vp.rs"
+
 [dev-dependencies]
 insta = { workspace = true }
 tempfile = { workspace = true }
