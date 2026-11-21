@@ -130,6 +130,23 @@ fn workspace_filter_respects_empty_member_list() {
 }
 
 #[test]
+fn vite_host_value_preserves_root_directory_completion() {
+    let temp = TempDir::new().unwrap();
+    std::fs::create_dir(temp.path().join("app-dir")).unwrap();
+    std::fs::write(temp.path().join("app-file"), "").unwrap();
+    for cmd in ["dev", "preview"] {
+        assert_eq!(
+            fish_completions(temp.path(), &[cmd, "--host", "localhost", "app"], &[]),
+            ["app-dir/"]
+        );
+        assert_eq!(
+            fish_completions(temp.path(), &["doc", cmd, "--host", "localhost", "app"], &[]),
+            ["app-dir/"]
+        );
+    }
+}
+
+#[test]
 fn offline_tasks_use_exported_vite_config() {
     let temp = TempDir::new().unwrap();
     std::fs::write(temp.path().join("vite.config.ts"), "const unused = { run: { tasks: { ghost: 'no' } } }; export default { run: { tasks: { real: 'ok' } } }").unwrap();

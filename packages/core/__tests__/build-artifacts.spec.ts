@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -131,6 +132,79 @@ describe('build artifacts', () => {
     expect(content).toContain(`import('../node/cli.js')`);
     expect(fs.existsSync(path.resolve(path.dirname(binPath), '../node/cli.js'))).toBe(true);
   });
+
+  it.each(['dev', 'build', 'preview', 'oxlint', 'oxfmt', 'tsdown', 'vitest'])(
+    'matches %s completion options to CLI help',
+    (tool) => {
+      const table: Record<
+        string,
+        {
+          short?: string;
+          long: string;
+          aliases?: string[];
+          optional_value?: boolean;
+          takes_value?: boolean;
+        }[]
+      > = JSON.parse(
+        fs.readFileSync(
+          path.join(coreDir, '../../crates/vp_global_cli/src/completion/passthrough.json'),
+          'utf8',
+        ),
+      );
+      const viteSections: Record<string, string> = {
+        dev: 'vite_server',
+        build: 'vite_build',
+        preview: 'vite_preview',
+      };
+      const viteSection = viteSections[tool];
+      let cli: string[];
+      if (viteSection) {
+        cli = [path.join(distDir, 'vite/bin/vite.js'), tool];
+      } else {
+        const cliRequire = createRequire(path.join(coreDir, '../cli/package.json'));
+        const manifest = cliRequire.resolve(`${tool}/package.json`);
+        cli = [path.resolve(path.dirname(manifest), cliRequire(manifest).bin[tool])];
+      }
+      const help = execFileSync(process.execPath, [...cli, '--help'], {
+        encoding: 'utf8',
+        env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' },
+      });
+      // CAC prints "--flag [optional]" / "--flag <required>". Oxc prints "--flag=VALUE".
+      const options = new Map<string, { short?: string; arity: string }>();
+      for (const line of help.split(/\r?\n/)) {
+        const label = line.trim().split(/\s{2,}/)[0];
+        const option = /^(?:-(\w), )?--([\w.*-]+)(?:=(\S+)| ([<[].*))?$/.exec(label);
+        if (!option || option[2] === 'help') {
+          continue;
+        }
+        const [, short, name, assigned, argument] = option;
+        const arity =
+          assigned || argument?.startsWith('<') ? 'required' : argument ? 'optional' : 'none';
+        options.set(name, { short, arity });
+      }
+      const flags = viteSection ? [...table.vite_common, ...table[viteSection]] : table[tool];
+      const completion = new Map<string, { short?: string; arity: string }>();
+      for (const flag of flags) {
+        // CAC also accepts negations of booleans and tsdown documents its env namespace as --env.*.
+        const names = [flag.long, ...(flag.aliases ?? [])];
+        const name =
+          names.find((n) => options.has(n)) ??
+          (tool === 'tsdown' && flag.long === 'env' ? 'env.*' : flag.long);
+        const positive = name.slice(3).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+        if (
+          name.startsWith('no-') &&
+          !options.has(name) &&
+          options.get(positive)?.arity === 'none'
+        ) {
+          continue;
+        }
+        const arity = flag.optional_value ? 'optional' : flag.takes_value ? 'required' : 'none';
+        expect(completion.has(name), `duplicate --${name}`).toBe(false);
+        completion.set(name, { short: flag.short, arity });
+      }
+      expect(completion).toEqual(options);
+    },
+  );
 
   it('bundles JavaScript Yuku packages and keeps the native parser external', async () => {
     await init();

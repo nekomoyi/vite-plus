@@ -1,8 +1,26 @@
-use vp_complete::{CmdSpec, PositionalSpec, ValueHint};
+use std::{collections::BTreeMap, sync::LazyLock};
+
+use vp_complete::{CmdSpec, FlagSpec, PositionalSpec, ValueHint};
 
 pub(super) fn bundled_local_specs() -> Vec<CmdSpec> {
     serde_json::from_str(include_str!("local_specs.json"))
         .expect("generated local command definitions")
+}
+
+fn passthrough_flags(section: &str) -> Vec<FlagSpec> {
+    static FLAGS: LazyLock<BTreeMap<String, Vec<FlagSpec>>> = LazyLock::new(|| {
+        serde_json::from_str(include_str!("passthrough.json"))
+            .expect("bundled tool completion flags")
+    });
+    FLAGS[section].clone()
+}
+
+#[derive(Clone, Copy)]
+enum OverlayKind {
+    Plain,
+    RootDirPositional,
+    VitestSubcommands,
+    VitepressSubcommands,
 }
 
 #[must_use]
@@ -93,6 +111,8 @@ pub(super) fn build_vpx_spec() -> CmdSpec {
         }
     }
 
+    vpx.flags.extend(passthrough_flags("vpx_extra"));
+
     vpx.positional(PositionalSpec::new("target")).positional(
         PositionalSpec::new("args")
             .multiple(true)
@@ -101,8 +121,26 @@ pub(super) fn build_vpx_spec() -> CmdSpec {
     )
 }
 
+fn passthrough_spec_for(cmd: &str) -> Option<(&'static [&'static str], OverlayKind)> {
+    match cmd {
+        "lint" => Some((&["oxlint"], OverlayKind::Plain)),
+        "fmt" => Some((&["oxfmt"], OverlayKind::Plain)),
+        "dev" => Some((&["vite_server", "vite_common"], OverlayKind::RootDirPositional)),
+        "build" => Some((&["vite_build", "vite_common"], OverlayKind::RootDirPositional)),
+        "preview" => Some((&["vite_preview", "vite_common"], OverlayKind::RootDirPositional)),
+        "test" => Some((&["vitest"], OverlayKind::VitestSubcommands)),
+        "pack" => Some((&["tsdown"], OverlayKind::Plain)),
+        "doc" => Some((&["vitepress"], OverlayKind::VitepressSubcommands)),
+        _ => None,
+    }
+}
+
 fn enrich_vp_spec(root: &mut CmdSpec) {
     for sub in &mut root.subcommands {
+        if let Some((sections, kind)) = passthrough_spec_for(&sub.name) {
+            apply_passthrough_overlay(sub, sections, kind);
+        }
+
         match sub.name.as_str() {
             "create" => {
                 set_static_flag_values(sub, "package-manager", &["pnpm", "npm", "yarn", "bun"]);
@@ -110,6 +148,57 @@ fn enrich_vp_spec(root: &mut CmdSpec) {
             "staged" => set_static_flag_values(sub, "concurrent", &["true", "false"]),
             "env" => enrich_env_subcommands(sub),
             _ => {}
+        }
+    }
+}
+
+fn apply_passthrough_overlay(target: &mut CmdSpec, sections: &[&str], kind: OverlayKind) {
+    let existing_help = target.flags.iter().find(|f| f.long.as_deref() == Some("help")).cloned();
+    target.flags.clear();
+    for section in sections {
+        target.flags.extend(passthrough_flags(section));
+    }
+    if let Some(help_flag) = existing_help
+        && !target.flags.iter().any(|f| f.long.as_deref() == Some("help"))
+    {
+        target.flags.push(help_flag);
+    }
+
+    // Tool options are still recognized after a path or test filter.
+    for pos in &mut target.positionals {
+        pos.trailing_var_arg = false;
+    }
+    match kind {
+        OverlayKind::Plain => {}
+        OverlayKind::RootDirPositional => {
+            target.positionals = vec![PositionalSpec::new("root").value_hint(ValueHint::DirPath)];
+        }
+        OverlayKind::VitestSubcommands => {
+            let inherited = target.flags.clone();
+            for sub_name in ["run", "watch", "dev", "related", "bench", "list"] {
+                target.subcommands.push(
+                    CmdSpec::new(sub_name)
+                        .about(format!("{sub_name} tests"))
+                        .flags(inherited.clone())
+                        .positional(
+                            PositionalSpec::new("filters")
+                                .multiple(true)
+                                .value_hint(ValueHint::AnyPath),
+                        ),
+                );
+            }
+        }
+        OverlayKind::VitepressSubcommands => {
+            target.positionals.clear();
+            let inherited = target.flags.clone();
+            for sub_name in ["dev", "build", "preview"] {
+                target.subcommands.push(
+                    CmdSpec::new(sub_name)
+                        .about(format!("{sub_name} documentation"))
+                        .flags(inherited.clone())
+                        .positional(PositionalSpec::new("root").value_hint(ValueHint::DirPath)),
+                );
+            }
         }
     }
 }

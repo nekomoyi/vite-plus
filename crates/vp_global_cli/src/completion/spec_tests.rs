@@ -21,6 +21,51 @@ fn assert_has_all(actual: &[String], expected: &[&str], context: &str) {
 }
 
 #[test]
+fn test_curated_subcommand_flags() {
+    let cwd = PathBuf::from("/workspace");
+
+    let check_flags = complete_values(&["vp", "check", "--"], &cwd);
+    assert_has_all(
+        &check_flags,
+        &["--fix", "--continue-on-error", "--deny-warnings", "--no-fmt", "--no-lint", "--quiet"],
+        "check flags",
+    );
+
+    let build_flags = complete_values(&["vp", "build", "--"], &cwd);
+    assert_has_all(
+        &build_flags,
+        &["--outDir", "--assetsDir", "--target", "--minify", "--watch"],
+        "build flags",
+    );
+
+    let test_flags = complete_values(&["vp", "test", "--"], &cwd);
+    assert_has_all(&test_flags, &["--coverage", "--isolate", "--reporter", "--bail"], "test flags");
+
+    assert_has_all(
+        &complete_values(&["vp", "test", "src/", "--cov"], &cwd),
+        &["--coverage"],
+        "vitest options after a filter",
+    );
+    let vpx_flags = complete_values(&["vpx", "--"], &cwd);
+    assert_has_all(
+        &vpx_flags,
+        &[
+            "--package",
+            "--shell-mode",
+            "--silent",
+            "--tsconfig",
+            "--watch",
+            "--conditions",
+            "--eval",
+            "--require",
+            "--import",
+            "--env-file",
+        ],
+        "vpx flags",
+    );
+}
+
+#[test]
 fn test_vpx_no_chdir_and_target_completion() {
     let temp_dir = TempDir::new().unwrap();
     let cwd = temp_dir.path();
@@ -109,6 +154,139 @@ fn test_pure_rust_dynamic_providers() {
         &["@scope/pkg-a", "pkg-b"],
         "vp run --filter",
     );
+}
+
+#[test]
+fn test_cli_definitions_drift() {
+    let spec = catalog::build_vp_spec(false);
+
+    let mut raw_root_spec = vp_complete::CmdSpec::from_clap(crate::cli::raw_cli_command());
+
+    // 1. Root flags must match `cli::Args` 1-to-1 (no unsupported root --filter)
+    let chdir = raw_root_spec.flags.iter_mut().find(|flag| flag.short == Some('C')).unwrap();
+    chdir.chdir = true;
+    chdir.value_hint = vp_complete::ValueHint::DirPath;
+    assert_eq!(spec.flags, raw_root_spec.flags);
+
+    // 2. Verify all 16 core subcommands (+ cache, hooks, toolchain) are present
+    let expected_subcommands = [
+        "check",
+        "lint",
+        "fmt",
+        "dev",
+        "build",
+        "test",
+        "preview",
+        "pack",
+        "doc",
+        "create",
+        "migrate",
+        "config",
+        "staged",
+        "run",
+        "exec",
+        "dlx",
+        "cache",
+        "hooks",
+        "toolchain",
+    ];
+
+    for name in expected_subcommands {
+        assert!(
+            spec.subcommands.iter().any(|s| s.name == name),
+            "Subcommand {name} missing from build_vp_cmd_spec()"
+        );
+    }
+
+    // 3. Verify every command in both `cli::raw_cli_command()` and `generated_local_specs`
+    //    is present in `build_vp_cmd_spec()`, and non-passthrough Clap commands match 1-to-1.
+    for raw_sub in &raw_root_spec.subcommands {
+        assert!(
+            spec.subcommands.iter().any(|s| s.name == raw_sub.name),
+            "Global Clap subcommand {} missing from build_vp_cmd_spec()",
+            raw_sub.name
+        );
+    }
+
+    let passthrough_names = ["build", "dev", "doc", "fmt", "lint", "pack", "preview", "test"];
+    for mut gen_sub in catalog::bundled_local_specs() {
+        let actual_sub =
+            spec.subcommands.iter().find(|s| s.name == gen_sub.name).unwrap_or_else(|| {
+                panic!("Generated subcommand {} missing from vp spec", gen_sub.name)
+            });
+
+        if passthrough_names.contains(&gen_sub.name.as_str()) {
+            assert_eq!(actual_sub.visible_aliases, gen_sub.visible_aliases);
+            assert_eq!(actual_sub.hidden, gen_sub.hidden);
+        } else {
+            // The CLI accepts additional values for these suggestions-only hints.
+            if let Some(long) = match gen_sub.name.as_str() {
+                "create" => Some("package-manager"),
+                "staged" => Some("concurrent"),
+                _ => None,
+            } {
+                let generated =
+                    gen_sub.flags.iter_mut().find(|f| f.long.as_deref() == Some(long)).unwrap();
+                generated.value_hint = actual_sub
+                    .flags
+                    .iter()
+                    .find(|f| f.long.as_deref() == Some(long))
+                    .unwrap()
+                    .value_hint
+                    .clone();
+            }
+            assert_eq!(actual_sub, &gen_sub);
+        }
+    }
+
+    let ws = TempDir::new().unwrap();
+    fs::write(
+        ws.path().join("package.json"),
+        r#"{"name":"completion-workspace","workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(ws.path().join("packages/member")).unwrap();
+    fs::write(ws.path().join("packages/member/package.json"), r#"{"name":"completion-member"}"#)
+        .unwrap();
+    for name in ["run", "exec", "pack", "dev", "build", "preview"] {
+        let values = complete_values(&["vp", name, "--filter", "completion-m"], ws.path());
+        assert_eq!(
+            values.iter().any(|v| v == "completion-member"),
+            matches!(name, "run" | "exec" | "pack"),
+            "{name}"
+        );
+    }
+
+    // 5. Verify vpx flags (inherited from dlx + script/watch/Node flags)
+    let vpx_cmd = catalog::build_vpx_spec();
+    let vpx_pkg = vpx_cmd.flags.iter().find(|f| f.long.as_deref() == Some("package")).unwrap();
+    assert!(vpx_pkg.multiple, "vpx -p/--package inherited from dlx must be repeatable");
+    for flag in [
+        "package",
+        "shell-mode",
+        "silent",
+        "tsconfig",
+        "watch",
+        "include",
+        "exclude",
+        "ignore",
+        "kill-signal",
+        "kill-timeout",
+        "conditions",
+        "eval",
+        "require",
+        "import",
+        "env-file",
+        "inspect",
+        "inspect-brk",
+        "version",
+        "help",
+    ] {
+        assert!(
+            vpx_cmd.flags.iter().any(|f| f.long.as_deref() == Some(flag)),
+            "vpx missing flag --{flag}"
+        );
+    }
 }
 
 #[test]
@@ -269,6 +447,103 @@ fn test_local_help_filtering_and_offline_node_semver() {
         "expected v22.14.0 over v9.9.0, got: {}",
         resolved.display()
     );
+}
+#[test]
+fn test_engine_optional_value_and_trailing_var_arg_and_lexer_fixes() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let ws = temp.path();
+    fs::create_dir_all(ws.join("packages/sub")).unwrap();
+    fs::write(
+        ws.join("package.json"),
+        r#"{"name":"root","workspaces":["packages/*"],"scripts":{"build":"vite build"}}"#,
+    )
+    .unwrap();
+    fs::write(ws.join("packages/sub/package.json"), r#"{"name":"@demo/sub"}"#).unwrap();
+
+    // 1. Optional flag value (`vp staged --concurrent <Tab>`, `vp staged --concurrent --al<Tab>`, `vp staged -p f<Tab>`)
+    let out_opt = complete_entry(&CompletionRequest::new(
+        vec!["vp".into(), "staged".into(), "--concurrent".into(), "".into()],
+        3,
+        ws.to_path_buf(),
+    ));
+    let opt_vals: Vec<&str> = out_opt.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(opt_vals, vec!["true", "false"]);
+
+    let out_opt_next_flag = complete_entry(&CompletionRequest::new(
+        vec!["vp".into(), "staged".into(), "--concurrent".into(), "--al".into()],
+        3,
+        ws.to_path_buf(),
+    ));
+    assert!(out_opt_next_flag.items.iter().any(|i| i.value == "--allow-empty"));
+
+    let out_short_opt = complete_entry(&CompletionRequest::new(
+        vec!["vp".into(), "staged".into(), "-p".into(), "f".into()],
+        3,
+        ws.to_path_buf(),
+    ));
+    let short_opt_vals: Vec<&str> = out_short_opt.items.iter().map(|i| i.value.as_str()).collect();
+    assert_eq!(short_opt_vals, vec!["false"]);
+
+    // 2. Trailing vararg stops wrapper flag parsing (`vp exec node --fi`, `vp exec node --filter `, `vp run build --fi`, while `vp lint src/ --fi` still completes)
+    let out_exec_child = complete_entry(&CompletionRequest::new(
+        vec!["vp".into(), "exec".into(), "node".into(), "--fi".into()],
+        3,
+        ws.to_path_buf(),
+    ));
+    assert!(
+        !out_exec_child.items.iter().any(|i| i.value == "--filter"),
+        "vp exec node --fi must not complete wrapper --filter: {:?}",
+        out_exec_child.items
+    );
+
+    let out_exec_child_val = complete_entry(&CompletionRequest::new(
+        vec!["vp".into(), "exec".into(), "node".into(), "--filter".into(), "".into()],
+        4,
+        ws.to_path_buf(),
+    ));
+    assert!(
+        !out_exec_child_val.items.iter().any(|i| i.value == "@demo/sub"),
+        "vp exec node --filter <Tab> must not suggest workspace packages: {:?}",
+        out_exec_child_val.items
+    );
+
+    let out_run_child = complete_entry(&CompletionRequest::new(
+        vec!["vp".into(), "run".into(), "build".into(), "--fi".into()],
+        3,
+        ws.to_path_buf(),
+    ));
+    assert!(!out_run_child.items.iter().any(|i| i.value == "--filter"));
+
+    let out_lint_flag = complete_entry(&CompletionRequest::new(
+        vec!["vp".into(), "lint".into(), "src/".into(), "--fi".into()],
+        3,
+        ws.to_path_buf(),
+    ));
+    assert!(out_lint_flag.items.iter().any(|i| i.value == "--fix"));
+
+    // 3. Lexer: escaped newlines and redirections
+    let lex_cont = vp_complete::lexer::parse_bash_line("vp \\\n  run \\\n  bu", 17);
+    assert_eq!(lex_cont.words, vec!["vp", "run", "bu"]);
+
+    let lex_dq_cont = vp_complete::lexer::parse_bash_line("vp \"foo\\\nbar\"", 13);
+    assert_eq!(lex_dq_cont.words, vec!["vp", "foobar"]);
+
+    let lex_redir1 = vp_complete::lexer::parse_bash_line("vp 2>/dev/null bu", 17);
+    assert_eq!(lex_redir1.words, vec!["vp", "bu"]);
+
+    let lex_redir2 = vp_complete::lexer::parse_bash_line("vp 2>&1 bu", 10);
+    assert_eq!(lex_redir2.words, vec!["vp", "bu"]);
+
+    // 4. Path: ~// resolves under home instead of root /
+    let home = ws.join("fake_home");
+    fs::create_dir_all(home.join("proj")).unwrap();
+    let tilde_slash = vp_complete::path::complete_path_with_home(
+        ws,
+        Some(&home),
+        "~//pr",
+        vp_complete::PathMode::DirsOnly,
+    );
+    assert_eq!(tilde_slash.items[0].value, "~//proj/");
 }
 #[test]
 fn test_workspace_yaml_globs_and_ancestor_fallback() {

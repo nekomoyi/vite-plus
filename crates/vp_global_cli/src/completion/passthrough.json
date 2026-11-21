@@ -1,0 +1,1271 @@
+{
+  "vpx_extra": [
+    {
+      "long": "tsconfig",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": ["json"]
+        }
+      },
+      "about": "tsconfig.json to use when running a script"
+    },
+    {
+      "long": "watch",
+      "about": "Rerun the script when a file it uses changes"
+    },
+    {
+      "long": "include",
+      "takes_value": true,
+      "about": "Watch files matching pattern"
+    },
+    {
+      "long": "exclude",
+      "takes_value": true,
+      "about": "Exclude files matching pattern"
+    },
+    {
+      "long": "ignore",
+      "takes_value": true,
+      "about": "Ignore files matching pattern"
+    },
+    {
+      "long": "kill-signal",
+      "takes_value": true,
+      "about": "Signal used to kill process in watch mode"
+    },
+    {
+      "long": "kill-timeout",
+      "takes_value": true,
+      "about": "Timeout before force-killing process"
+    },
+    {
+      "short": "C",
+      "long": "conditions",
+      "takes_value": true,
+      "about": "Node.js export conditions"
+    },
+    {
+      "short": "e",
+      "long": "eval",
+      "takes_value": true,
+      "about": "Evaluate script"
+    },
+    {
+      "short": "r",
+      "long": "require",
+      "takes_value": true,
+      "about": "Preload CommonJS module"
+    },
+    {
+      "long": "import",
+      "takes_value": true,
+      "about": "Preload ES module"
+    },
+    {
+      "long": "env-file",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": []
+        }
+      },
+      "about": "Load environment variables from file"
+    },
+    {
+      "long": "inspect",
+      "about": "Enable Node.js inspector"
+    },
+    {
+      "long": "inspect-brk",
+      "about": "Enable Node.js inspector and break"
+    },
+    {
+      "short": "v",
+      "long": "version",
+      "about": "Print version"
+    },
+    {
+      "short": "h",
+      "long": "help",
+      "about": "Print help"
+    }
+  ],
+  "vite_common": [
+    {
+      "long": "configLoader",
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["bundle", null],
+          ["runner", null],
+          ["native", null]
+        ]
+      },
+      "about": "Select config loader"
+    },
+    {
+      "long": "profile",
+      "optional_value": true,
+      "about": "Start the Node.js inspector"
+    },
+    {
+      "long": "base",
+      "takes_value": true,
+      "about": "Public base path"
+    },
+    {
+      "short": "l",
+      "long": "logLevel",
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["info", null],
+          ["warn", null],
+          ["error", null],
+          ["silent", null]
+        ]
+      },
+      "about": "Log level"
+    },
+    {
+      "long": "clearScreen",
+      "about": "Allow/disable clear screen"
+    },
+    {
+      "short": "d",
+      "long": "debug",
+      "optional_value": true,
+      "about": "Show debug logs"
+    },
+    {
+      "short": "f",
+      "long": "filter",
+      "takes_value": true,
+      "about": "Filter debug logs"
+    },
+    {
+      "short": "m",
+      "long": "mode",
+      "takes_value": true,
+      "about": "Set env mode"
+    },
+    {
+      "short": "c",
+      "long": "config",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": ["js", "ts", "mjs", "mts", "cjs", "cts"]
+        }
+      },
+      "about": "Config file"
+    }
+  ],
+  "vite_server": [
+    {
+      "short": "v",
+      "long": "version",
+      "about": "Print version"
+    },
+    {
+      "long": "host",
+      "optional_value": true,
+      "about": "Specify hostname"
+    },
+    {
+      "long": "port",
+      "takes_value": true,
+      "about": "Specify port"
+    },
+    {
+      "long": "open",
+      "optional_value": true,
+      "about": "Open browser on startup"
+    },
+    {
+      "long": "cors",
+      "about": "Enable CORS"
+    },
+    {
+      "long": "strictPort",
+      "about": "Exit if specified port is already in use"
+    },
+    {
+      "long": "force",
+      "about": "Force optimizer to re-bundle"
+    },
+    {
+      "long": "experimentalBundle",
+      "about": "Use experimental full bundle mode"
+    }
+  ],
+  "vite_build": [
+    {
+      "long": "target",
+      "takes_value": true,
+      "about": "Transpile target"
+    },
+    {
+      "long": "outDir",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Output directory"
+    },
+    {
+      "long": "assetsDir",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Assets directory under outDir"
+    },
+    {
+      "long": "assetsInlineLimit",
+      "takes_value": true,
+      "about": "Asset base64 inline threshold"
+    },
+    {
+      "long": "ssr",
+      "optional_value": true,
+      "about": "Build specified entry for SSR"
+    },
+    {
+      "long": "sourcemap",
+      "optional_value": true,
+      "about": "Output source maps"
+    },
+    {
+      "long": "minify",
+      "optional_value": true,
+      "about": "Enable/disable minification"
+    },
+    {
+      "long": "manifest",
+      "optional_value": true,
+      "about": "Emit build manifest json"
+    },
+    {
+      "long": "ssrManifest",
+      "optional_value": true,
+      "about": "Emit ssr manifest json"
+    },
+    {
+      "long": "emptyOutDir",
+      "about": "Force empty outDir"
+    },
+    {
+      "short": "w",
+      "long": "watch",
+      "about": "Rebuild when modules change"
+    },
+    {
+      "long": "app",
+      "about": "Same as builder: {}"
+    }
+  ],
+  "vite_preview": [
+    {
+      "long": "host",
+      "optional_value": true,
+      "about": "Specify hostname"
+    },
+    {
+      "long": "port",
+      "takes_value": true,
+      "about": "Specify port"
+    },
+    {
+      "long": "strictPort",
+      "about": "Exit if port is in use"
+    },
+    {
+      "long": "open",
+      "optional_value": true,
+      "about": "Open browser on startup"
+    },
+    {
+      "long": "outDir",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Output directory"
+    }
+  ],
+  "oxlint": [
+    {
+      "short": "c",
+      "long": "config",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": ["json", "js", "cjs", "mjs", "ts"]
+        }
+      },
+      "about": "Path to config file"
+    },
+    {
+      "long": "disable-nested-config",
+      "about": "Ignore configuration files in subdirectories"
+    },
+    {
+      "long": "tsconfig",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": ["json"]
+        }
+      },
+      "about": "Path to tsconfig.json"
+    },
+    {
+      "long": "fix",
+      "about": "Fix problems"
+    },
+    {
+      "long": "fix-suggestions",
+      "about": "Apply auto-fixable suggestions"
+    },
+    {
+      "long": "fix-dangerously",
+      "about": "Apply dangerous fixes and suggestions"
+    },
+    {
+      "short": "f",
+      "long": "format",
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["checkstyle", null],
+          ["default", null],
+          ["agent", null],
+          ["github", null],
+          ["gitlab", null],
+          ["json", null],
+          ["junit", null],
+          ["sarif", null],
+          ["stylish", null],
+          ["unix", null],
+          ["sonarlint", null]
+        ]
+      },
+      "about": "Output format"
+    },
+    {
+      "long": "quiet",
+      "about": "Disable reporting on warnings"
+    },
+    {
+      "long": "deny-warnings",
+      "about": "Treat warnings as errors"
+    },
+    {
+      "long": "max-warnings",
+      "takes_value": true,
+      "about": "Max warnings allowed"
+    },
+    {
+      "long": "import-plugin",
+      "about": "Enable import plugin"
+    },
+    {
+      "long": "jsdoc-plugin",
+      "about": "Enable jsdoc plugin"
+    },
+    {
+      "long": "jest-plugin",
+      "about": "Enable jest plugin"
+    },
+    {
+      "long": "vitest-plugin",
+      "about": "Enable vitest plugin"
+    },
+    {
+      "long": "jsx-a11y-plugin",
+      "about": "Enable jsx-a11y plugin"
+    },
+    {
+      "long": "nextjs-plugin",
+      "about": "Enable nextjs plugin"
+    },
+    {
+      "long": "react-plugin",
+      "about": "Enable react plugin"
+    },
+    {
+      "long": "react-perf-plugin",
+      "about": "Enable react performance plugin"
+    },
+    {
+      "long": "promise-plugin",
+      "about": "Enable promise plugin"
+    },
+    {
+      "long": "node-plugin",
+      "about": "Enable node plugin"
+    },
+    {
+      "long": "disable-unicorn-plugin",
+      "about": "Disable unicorn plugin"
+    },
+    {
+      "long": "disable-oxc-plugin",
+      "about": "Disable oxc unique rules"
+    },
+    {
+      "long": "disable-typescript-plugin",
+      "about": "Disable typescript plugin"
+    },
+    {
+      "long": "vue-plugin",
+      "about": "Enable vue plugin"
+    },
+    {
+      "long": "type-aware",
+      "about": "Enable rules that require type information"
+    },
+    {
+      "long": "type-check",
+      "about": "Enable experimental type checking"
+    },
+    {
+      "long": "rules",
+      "about": "List all rules"
+    },
+    {
+      "long": "lsp",
+      "about": "Run as language server"
+    },
+    {
+      "long": "init",
+      "about": "Initialize config file"
+    },
+    {
+      "long": "ignore-path",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": []
+        }
+      },
+      "about": "Specify ignore file"
+    },
+    {
+      "long": "ignore-pattern",
+      "takes_value": true,
+      "about": "Pattern of files to ignore"
+    },
+    {
+      "long": "no-ignore",
+      "about": "Disable ignore files"
+    },
+    {
+      "long": "threads",
+      "takes_value": true,
+      "about": "Number of threads to use"
+    },
+    {
+      "long": "debug",
+      "about": "Enable debug output",
+      "takes_value": true
+    },
+    {
+      "long": "silent",
+      "about": "Do not display diagnostics"
+    },
+    {
+      "long": "print-config",
+      "about": "Print configuration"
+    },
+    {
+      "long": "report-unused-disable-directives",
+      "about": "Report unused disable directives"
+    },
+    {
+      "long": "report-unused-disable-directives-severity",
+      "takes_value": true,
+      "about": "Severity level of unused disable directives"
+    },
+    {
+      "long": "no-error-on-unmatched-pattern",
+      "about": "Do not exit with error when pattern is unmatched"
+    },
+    {
+      "short": "A",
+      "long": "allow",
+      "takes_value": true,
+      "about": "Allow rule or category"
+    },
+    {
+      "short": "W",
+      "long": "warn",
+      "takes_value": true,
+      "about": "Warn on rule or category"
+    },
+    {
+      "short": "D",
+      "long": "deny",
+      "takes_value": true,
+      "about": "Deny rule or category"
+    },
+    {
+      "long": "version",
+      "short": "V",
+      "about": "Print version"
+    }
+  ],
+  "oxfmt": [
+    {
+      "short": "c",
+      "long": "config",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": ["json", "js", "cjs", "mjs", "ts"]
+        }
+      },
+      "about": "Path to config file"
+    },
+    {
+      "long": "disable-nested-config",
+      "about": "Ignore configuration files in subdirectories"
+    },
+    {
+      "long": "check",
+      "about": "Check if files are formatted"
+    },
+    {
+      "long": "list-different",
+      "about": "List files that would be changed"
+    },
+    {
+      "long": "write",
+      "about": "Format and write files in place"
+    },
+    {
+      "long": "init",
+      "about": "Initialize configuration"
+    },
+    {
+      "long": "migrate",
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["prettier", null],
+          ["biome", null]
+        ]
+      },
+      "about": "Migrate config from another tool"
+    },
+    {
+      "long": "lsp",
+      "about": "Run as language server"
+    },
+    {
+      "long": "stdin-filepath",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": []
+        }
+      },
+      "about": "Specify file name to infer parser"
+    },
+    {
+      "long": "ignore-path",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": []
+        }
+      },
+      "about": "Path to ignore file"
+    },
+    {
+      "long": "with-node-modules",
+      "about": "Format code in node_modules directory"
+    },
+    {
+      "long": "no-error-on-unmatched-pattern",
+      "about": "Do not exit with error when pattern is unmatched"
+    },
+    {
+      "long": "threads",
+      "takes_value": true,
+      "about": "Number of threads to use"
+    },
+    {
+      "long": "version",
+      "short": "V",
+      "about": "Print version"
+    }
+  ],
+  "vitest": [
+    {
+      "short": "r",
+      "long": "root",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Root path"
+    },
+    {
+      "long": "configLoader",
+      "takes_value": true,
+      "about": "Select the config loader"
+    },
+    {
+      "short": "c",
+      "long": "config",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": ["js", "ts", "mjs", "mts"]
+        }
+      },
+      "about": "Config file"
+    },
+    {
+      "short": "u",
+      "long": "update",
+      "about": "Update snapshot",
+      "optional_value": true
+    },
+    {
+      "short": "w",
+      "long": "watch",
+      "about": "Enable watch mode"
+    },
+    {
+      "short": "t",
+      "long": "testNamePattern",
+      "takes_value": true,
+      "about": "Filter test names"
+    },
+    {
+      "long": "dir",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Base directory to scan"
+    },
+    {
+      "long": "ui",
+      "about": "Enable UI"
+    },
+    {
+      "long": "open",
+      "about": "Open UI automatically"
+    },
+    {
+      "long": "api",
+      "about": "Specify server port",
+      "optional_value": true
+    },
+    {
+      "long": "silent",
+      "about": "Silent console output",
+      "optional_value": true
+    },
+    {
+      "long": "hideSkippedTests",
+      "about": "Hide skipped tests"
+    },
+    {
+      "long": "reporter",
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["default", null],
+          ["agent", null],
+          ["minimal", null],
+          ["blob", null],
+          ["verbose", null],
+          ["dot", null],
+          ["json", null],
+          ["tap", null],
+          ["tap-flat", null],
+          ["junit", null],
+          ["tree", null],
+          ["hanging-process", null],
+          ["github-actions", null]
+        ]
+      },
+      "about": "Specify reporters"
+    },
+    {
+      "long": "outputFile",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": []
+        }
+      },
+      "about": "Output file"
+    },
+    {
+      "long": "coverage",
+      "about": "Enable coverage report"
+    },
+    {
+      "long": "mode",
+      "takes_value": true,
+      "about": "Override Vite mode"
+    },
+    {
+      "long": "isolate",
+      "about": "Run test files in isolation"
+    },
+    {
+      "long": "no-isolate",
+      "about": "Disable test file isolation"
+    },
+    {
+      "long": "globals",
+      "about": "Inject APIs globally"
+    },
+    {
+      "long": "injectCjsGlobals",
+      "about": "Inject CommonJS variables"
+    },
+    {
+      "long": "no-inject-cjs-globals",
+      "about": "Disable CommonJS variables"
+    },
+    {
+      "long": "dom",
+      "about": "Mock browser API"
+    },
+    {
+      "long": "browser",
+      "about": "Run tests in browser",
+      "takes_value": true
+    },
+    {
+      "long": "pool",
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["threads", null],
+          ["forks", null],
+          ["vmThreads", null],
+          ["vmForks", null],
+          ["typescript", null]
+        ]
+      },
+      "about": "Specify pool"
+    },
+    {
+      "long": "execArgv",
+      "takes_value": true,
+      "about": "Arguments for node process"
+    },
+    {
+      "long": "vmMemoryLimit",
+      "takes_value": true,
+      "about": "Memory limit for VM pools"
+    },
+    {
+      "long": "fileParallelism",
+      "about": "Run test files in parallel"
+    },
+    {
+      "long": "no-file-parallelism",
+      "about": "Disable parallel test file runs"
+    },
+    {
+      "long": "maxWorkers",
+      "takes_value": true,
+      "about": "Max workers"
+    },
+    {
+      "long": "environment",
+      "takes_value": true,
+      "about": "Runner environment"
+    },
+    {
+      "long": "passWithNoTests",
+      "about": "Pass when no tests found"
+    },
+    {
+      "long": "logHeapUsage",
+      "about": "Show heap size"
+    },
+    {
+      "long": "detectAsyncLeaks",
+      "about": "Detect leaking async resources"
+    },
+    {
+      "long": "allowOnly",
+      "about": "Allow only tests"
+    },
+    {
+      "long": "dangerouslyIgnoreUnhandledErrors",
+      "about": "Ignore unhandled errors"
+    },
+    {
+      "long": "shard",
+      "takes_value": true,
+      "about": "Test suite shard"
+    },
+    {
+      "long": "changed",
+      "about": "Run tests affected by changes",
+      "optional_value": true
+    },
+    {
+      "long": "sinceLastRun",
+      "about": "Run modified and failed tests"
+    },
+    {
+      "long": "lastFailed",
+      "about": "Run only failed tests"
+    },
+    {
+      "long": "sequence",
+      "takes_value": true,
+      "about": "Sort options"
+    },
+    {
+      "long": "inspect",
+      "about": "Enable inspector",
+      "optional_value": true
+    },
+    {
+      "long": "inspectBrk",
+      "about": "Enable inspector and break",
+      "optional_value": true
+    },
+    {
+      "long": "testTimeout",
+      "takes_value": true,
+      "about": "Test timeout in ms"
+    },
+    {
+      "long": "hookTimeout",
+      "takes_value": true,
+      "about": "Hook timeout in ms"
+    },
+    {
+      "long": "bail",
+      "about": "Stop execution after failures",
+      "optional_value": true
+    },
+    {
+      "long": "retry",
+      "takes_value": true,
+      "about": "Retry failed tests"
+    },
+    {
+      "long": "repeats",
+      "takes_value": true,
+      "about": "Repeat tests"
+    },
+    {
+      "long": "diff",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": []
+        }
+      },
+      "about": "Diff options path"
+    },
+    {
+      "long": "exclude",
+      "takes_value": true,
+      "about": "Excluded globs"
+    },
+    {
+      "long": "expandSnapshotDiff",
+      "about": "Show full diff on snapshot fail"
+    },
+    {
+      "long": "disableConsoleIntercept",
+      "about": "Disable console intercept"
+    },
+    {
+      "long": "typecheck",
+      "about": "Enable typechecking"
+    },
+    {
+      "short": "p",
+      "long": "project",
+      "takes_value": true,
+      "about": "Vitest project filter"
+    },
+    {
+      "long": "slowTestThreshold",
+      "takes_value": true,
+      "about": "Slow test threshold ms"
+    },
+    {
+      "long": "teardownTimeout",
+      "takes_value": true,
+      "about": "Teardown timeout ms"
+    },
+    {
+      "long": "cache",
+      "about": "Store test run cache"
+    },
+    {
+      "long": "maxConcurrency",
+      "takes_value": true,
+      "about": "Max concurrent tests"
+    },
+    {
+      "long": "fsModuleCache",
+      "about": "Cache modules on fs"
+    },
+    {
+      "long": "fsModuleCachePath",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Fs cache path"
+    },
+    {
+      "long": "expect",
+      "about": "Expect options"
+    },
+    {
+      "long": "printConsoleTrace",
+      "about": "Print console stack traces"
+    },
+    {
+      "long": "includeTaskLocation",
+      "about": "Collect test locations"
+    },
+    {
+      "long": "attachmentsDir",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Attachments directory"
+    },
+    {
+      "long": "run",
+      "about": "Disable watch mode"
+    },
+    {
+      "long": "no-color",
+      "about": "Disable colors"
+    },
+    {
+      "long": "clearScreen",
+      "about": "Clear screen in watch mode"
+    },
+    {
+      "long": "standalone",
+      "about": "Start without running tests"
+    },
+    {
+      "long": "merge-reports",
+      "aliases": ["mergeReports"],
+      "about": "Merge blob reports",
+      "optional_value": true,
+      "value_hint": "dir_path"
+    },
+    {
+      "long": "listTags",
+      "about": "List available tags",
+      "optional_value": true
+    },
+    {
+      "long": "clearCache",
+      "about": "Delete test caches"
+    },
+    {
+      "long": "tagsFilter",
+      "takes_value": true,
+      "about": "Filter tests by tags"
+    },
+    {
+      "long": "strictTags",
+      "about": "Error on undefined tags"
+    },
+    {
+      "long": "sharedViteServer",
+      "about": "Reuse Vite server"
+    },
+    {
+      "long": "experimental",
+      "takes_value": true,
+      "about": "Experimental features"
+    },
+    {
+      "long": "version",
+      "short": "v",
+      "about": "Print version"
+    }
+  ],
+  "tsdown": [
+    {
+      "short": "c",
+      "long": "config",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": ["js", "ts", "mjs", "mts", "json"]
+        }
+      },
+      "about": "Config file"
+    },
+    {
+      "long": "config-loader",
+      "takes_value": true,
+      "about": "Select the config loader"
+    },
+    {
+      "long": "no-config",
+      "about": "Disable config file"
+    },
+    {
+      "short": "d",
+      "long": "out-dir",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Output directory"
+    },
+    {
+      "short": "f",
+      "long": "format",
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["esm", null],
+          ["cjs", null],
+          ["iife", null],
+          ["umd", null]
+        ]
+      },
+      "about": "Bundle format"
+    },
+    {
+      "long": "platform",
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["node", null],
+          ["browser", null],
+          ["neutral", null]
+        ]
+      },
+      "about": "Target platform"
+    },
+    {
+      "long": "target",
+      "takes_value": true,
+      "about": "Bundle target"
+    },
+    {
+      "long": "dts",
+      "about": "Generate DTS files"
+    },
+    {
+      "long": "sourcemap",
+      "about": "Generate source map"
+    },
+    {
+      "long": "minify",
+      "about": "Minify output"
+    },
+    {
+      "short": "w",
+      "long": "watch",
+      "about": "Watch mode",
+      "optional_value": true
+    },
+    {
+      "long": "clean",
+      "about": "Clean output directory"
+    },
+    {
+      "long": "no-clean",
+      "about": "Do not clean output directory"
+    },
+    {
+      "long": "deps.never-bundle",
+      "takes_value": true,
+      "about": "Mark dependencies as external"
+    },
+    {
+      "long": "treeshake",
+      "about": "Tree-shake bundle"
+    },
+    {
+      "long": "shims",
+      "about": "Enable cjs/esm shims"
+    },
+    {
+      "long": "exports",
+      "about": "Generate export metadata"
+    },
+    {
+      "long": "publint",
+      "about": "Enable publint"
+    },
+    {
+      "long": "attw",
+      "about": "Enable are-the-types-wrong"
+    },
+    {
+      "long": "unused",
+      "about": "Check unused dependencies"
+    },
+    {
+      "long": "from-vite",
+      "about": "Reuse config from Vite/Vitest",
+      "optional_value": true
+    },
+    {
+      "long": "report",
+      "about": "Size report"
+    },
+    {
+      "long": "env",
+      "takes_value": true,
+      "about": "Compile-time env"
+    },
+    {
+      "long": "on-success",
+      "takes_value": true,
+      "about": "Command on success"
+    },
+    {
+      "long": "copy",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Copy files to output dir"
+    },
+    {
+      "long": "exe",
+      "about": "Bundle as executable"
+    },
+    {
+      "short": "l",
+      "long": "log-level",
+      "aliases": ["logLevel"],
+      "takes_value": true,
+      "value_hint": {
+        "static_values": [
+          ["info", null],
+          ["warn", null],
+          ["error", null],
+          ["silent", null]
+        ]
+      },
+      "about": "Log level"
+    },
+    {
+      "long": "devtools",
+      "about": "Enable devtools integration"
+    },
+    {
+      "long": "fail-on-warn",
+      "about": "Fail on warnings"
+    },
+    {
+      "long": "no-write",
+      "about": "Disable writing files to disk"
+    },
+    {
+      "long": "ignore-watch",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": []
+        }
+      },
+      "about": "Ignore paths in watch mode"
+    },
+    {
+      "long": "env-file",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": []
+        }
+      },
+      "about": "Load env from file"
+    },
+    {
+      "long": "env-prefix",
+      "takes_value": true,
+      "about": "Prefix for bundle env"
+    },
+    {
+      "long": "tsconfig",
+      "takes_value": true,
+      "value_hint": {
+        "file_path": {
+          "extensions": ["json"]
+        }
+      },
+      "about": "Set tsconfig path"
+    },
+    {
+      "long": "unbundle",
+      "about": "Unbundle mode"
+    },
+    {
+      "long": "root",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Root directory"
+    },
+    {
+      "short": "W",
+      "long": "workspace",
+      "about": "Workspace mode",
+      "optional_value": true
+    },
+    {
+      "long": "concurrency",
+      "takes_value": true,
+      "about": "Max builds in parallel"
+    },
+    {
+      "short": "F",
+      "long": "filter",
+      "takes_value": true,
+      "multiple": true,
+      "about": "Filter configs"
+    },
+    {
+      "long": "debug",
+      "optional_value": true,
+      "about": "Show debug logs"
+    },
+    {
+      "long": "version",
+      "short": "v",
+      "about": "Print version"
+    }
+  ],
+  "vitepress": [
+    {
+      "long": "outDir",
+      "takes_value": true,
+      "value_hint": "dir_path",
+      "about": "Output directory"
+    },
+    {
+      "long": "base",
+      "takes_value": true,
+      "about": "Base path"
+    },
+    {
+      "long": "port",
+      "takes_value": true,
+      "about": "Port"
+    },
+    {
+      "long": "host",
+      "optional_value": true,
+      "about": "Host"
+    },
+    {
+      "long": "open",
+      "optional_value": true,
+      "about": "Open browser"
+    },
+    {
+      "long": "debug",
+      "about": "Debug logs"
+    }
+  ]
+}
