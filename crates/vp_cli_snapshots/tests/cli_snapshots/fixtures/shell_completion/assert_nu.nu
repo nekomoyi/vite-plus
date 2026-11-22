@@ -6,6 +6,8 @@ let lines = [
   "vp run --filter ",
   "vp check --",
   "vpx -C custom ./scripts/",
+  "vp fo",
+  "vp i",
 ]
 let env_nu = ($env.VP_HOME | path join "env.nu")
 let script = $"source '($env_nu)'
@@ -19,14 +21,22 @@ if ($result.stderr | str contains "deprecated") {
 }
 
 let completions = ($result.stdout | from json)
+let alias_values = ($completions | first | each {|v| $v | str trim } | sort)
+if $alias_values != ["un", "uninstall", "unlink"] {
+  error make { msg: $"vp un must offer each matching spelling, got: ($alias_values)" }
+}
+let install_values = ($completions | last | each {|v| $v | str trim })
+if "install" not-in $install_values or "i" in $install_values {
+  error make { msg: $"vp i should prefer install, got: ($install_values)" }
+}
 let expected_pairs = [
-  [0 "uninstall"]
   [1 "sub:task"]
   [2 "build:watch"]
   [3 "react"]
   [4 "@demo/subpkg"]
   [5 "--fix-dangerously"]
   [6 "./scripts/seed.ts"]
+  [7 "format"]
 ]
 for pair in $expected_pairs {
   let values = ($completions | get $pair.0 | each {|v| $v | str trim })

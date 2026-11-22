@@ -93,19 +93,33 @@ _vp_complete() {
   fi
 
   if (( ${#_vp_lines} > 0 )); then
-    local -a _v_mats=() _v_disp=() _d_mats=() _d_disp=() _qopt=()
+    local -a _cmd_specs=() _cmd_words=() _v_mats=() _v_disp=() _d_mats=() _d_disp=() _qopt=()
     local _has_v_desc=0 _has_d_desc=0 _keep=$(( (_directive & 32) != 0 )) _entry _kind _rest
     [[ -z "$_q" ]] && _qopt=(-Q)
     for _entry in "${_vp_lines[@]}"; do
       _kind="${_entry%%$'\t'*}"
       _rest="${_entry#*$'\t'}"
       case "$_kind" in
+        C)
+          local _word="${_rest%%$'\t'*}"
+          _cmd_words+=("$_word")
+          # _describe uses an unescaped colon to separate spelling and description.
+          _word="${_word//\\/\\\\}"
+          _cmd_specs+=("${_word//:/\\:}:${_rest#*$'\t'}")
+          ;;
         d) _d_mats+=("${_rest%%$'\t'*}"); _d_disp+=("${_rest#*$'\t'}") ;;
         D) _d_mats+=("${_rest%%$'\t'*}"); _d_disp+=("${_rest#*$'\t'}"); _has_d_desc=1 ;;
         V) _v_mats+=("${_rest%%$'\t'*}"); _v_disp+=("${_rest#*$'\t'}"); _has_v_desc=1 ;;
         *) _v_mats+=("${_rest%%$'\t'*}"); _v_disp+=("${_rest#*$'\t'}") ;;
       esac
     done
+    if (( ${#_cmd_words} )); then
+      if (( $+functions[_describe] )); then
+        _describe -t commands 'command' _cmd_specs
+      else
+        _vp_compadd "$_keep" -a _cmd_words
+      fi
+    fi
     if (( ${#_v_mats} > 0 )); then
       local -a _v_opts=("${_qopt[@]}")
       (( ${#_d_mats} == 0 && (_directive & 2) )) && _v_opts+=(-S '')

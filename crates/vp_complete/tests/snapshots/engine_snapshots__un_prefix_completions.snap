@@ -11,20 +11,6 @@ CompletionOutput {
             ),
             kind: Subcommand,
         },
-        CompletionItem {
-            value: "unlink",
-            description: Some(
-                "Remove dependencies",
-            ),
-            kind: Subcommand,
-        },
-        CompletionItem {
-            value: "un",
-            description: Some(
-                "Remove dependencies",
-            ),
-            kind: Subcommand,
-        },
     ],
     directive: CompletionDirective(
         NO_FILE_COMP,

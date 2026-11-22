@@ -109,8 +109,6 @@ pub fn complete<'a>(
         parent: ancestor_specs.last().map(|cmd| cmd.name.as_str()),
     };
 
-    let leading = current_index == 1;
-
     let mut out = compute_target_completions(
         active_spec,
         &ancestor_specs,
@@ -118,7 +116,7 @@ pub fn complete<'a>(
         past_double_dash,
         trailing_args,
         expecting_flag_val,
-        leading,
+        req,
         &mut ctx,
         provider,
     );
@@ -148,7 +146,7 @@ fn compute_target_completions<'a>(
     past_double_dash: bool,
     trailing_args: bool,
     expecting_flag_val: Option<&'a FlagSpec>,
-    leading: bool,
+    req: &CompletionRequest,
     ctx: &mut CompletionContext,
     provider: &ValueProvider<'_>,
 ) -> CompletionOutput {
@@ -169,6 +167,7 @@ fn compute_target_completions<'a>(
 
     // Case 2: Cursor is on an inline or attached flag value before `--` / trailing varargs
     if parse_wrapper_flags && ctx.prefix.starts_with('-') {
+        let leading = req.current_index == 1;
         if let Some((flag, Some(start))) =
             scan_flags(&ctx.prefix, active_spec, ancestor_specs, leading, |_| {})
         {
@@ -190,7 +189,8 @@ fn compute_target_completions<'a>(
     let mut had_subcommands = false;
 
     if parse_wrapper_flags && ctx.positional_index == 0 && !active_spec.subcommands.is_empty() {
-        let sub_out = complete_subcommands(active_spec, &ctx.prefix);
+        let sub_out =
+            complete_subcommands(active_spec, &ctx.prefix, req.include_aliases_with_canonical);
         had_subcommands = !sub_out.items.is_empty();
         items.extend(sub_out.items);
         directive |= sub_out.directive;
@@ -411,55 +411,28 @@ fn complete_flags<'a>(
     CompletionOutput::new(items, CompletionDirective::NO_FILE_COMP)
 }
 
-fn push_aliases_list(buf: &mut String, aliases: &[String]) {
-    buf.push_str("(aliases: ");
-    for (idx, a) in aliases.iter().enumerate() {
-        if idx > 0 {
-            buf.push_str(", ");
-        }
-        buf.push_str(a);
-    }
-    buf.push(')');
-}
-
-fn complete_subcommands(active: &CmdSpec, prefix: &str) -> CompletionOutput {
+fn complete_subcommands(
+    active: &CmdSpec,
+    prefix: &str,
+    include_aliases_with_canonical: bool,
+) -> CompletionOutput {
     let mut items = Vec::new();
-
-    if prefix.is_empty() {
-        for sub in &active.subcommands {
-            if sub.hidden {
+    for sub in &active.subcommands {
+        if sub.hidden && prefix.is_empty() {
+            continue;
+        }
+        if !sub.hidden && sub.name.starts_with(prefix) {
+            items.push(CompletionItem::subcommand(sub.name.clone(), sub.about.clone()));
+            if !include_aliases_with_canonical {
                 continue;
             }
-            let desc = match (&sub.about, sub.visible_aliases.as_slice()) {
-                (Some(about), aliases) if !aliases.is_empty() && !about.contains("aliases:") => {
-                    let mut s = String::with_capacity(about.len() + 20);
-                    s.push_str(about);
-                    s.push(' ');
-                    push_aliases_list(&mut s, aliases);
-                    Some(s)
-                }
-                (Some(about), _) => Some(about.clone()),
-                (None, aliases) if !aliases.is_empty() => {
-                    let mut s = String::new();
-                    push_aliases_list(&mut s, aliases);
-                    Some(s)
-                }
-                (None, _) => None,
-            };
-            items.push(CompletionItem::subcommand(sub.name.clone(), desc));
         }
-    } else {
-        for sub in &active.subcommands {
-            if !sub.hidden && sub.name.starts_with(prefix) {
-                items.push(CompletionItem::subcommand(sub.name.clone(), sub.about.clone()));
-            }
-            for alias in sub.visible_aliases.iter().chain(&sub.hidden_aliases) {
-                if alias.starts_with(prefix) {
-                    items.push(CompletionItem::subcommand(alias.clone(), sub.about.clone()));
-                }
+        let hidden = sub.hidden_aliases.iter().filter(|_| !prefix.is_empty());
+        for spelling in sub.visible_aliases.iter().chain(hidden) {
+            if spelling.starts_with(prefix) {
+                items.push(CompletionItem::subcommand(spelling.clone(), sub.about.clone()));
             }
         }
     }
-
     CompletionOutput::new(items, CompletionDirective::NO_FILE_COMP)
 }

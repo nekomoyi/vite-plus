@@ -606,7 +606,7 @@ fn shorthand_accepts_only_a_leading_directory_option() {
 }
 
 #[test]
-fn test_bimodal_subcommand_alias_matching() {
+fn subcommand_aliases_are_candidates_in_cli_catalog() {
     let cwd = PathBuf::from("/workspace");
 
     let req_empty = CompletionRequest::new(vec!["vp".into(), "".into()], 1, cwd.clone());
@@ -621,7 +621,6 @@ fn test_bimodal_subcommand_alias_matching() {
     let req_un = CompletionRequest::new(vec!["vp".into(), "un".into()], 1, cwd);
     let out_un = complete_entry(&req_un);
     let values: Vec<&str> = out_un.items.iter().map(|it| it.value.as_str()).collect();
-    assert!(values.contains(&"un"), "Must contain un: {values:?}");
-    assert!(values.contains(&"uninstall"), "Must contain uninstall: {values:?}");
-    assert!(values.contains(&"unlink"), "Must contain unlink: {values:?}");
+    assert_eq!(values, ["un", "uninstall", "unlink"]);
+    assert_eq!(out_un.items[0].description, out_un.items[1].description);
 }

@@ -42,15 +42,9 @@ fn test_early_completion_intercept_uninitialized_home() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("V\tun\t"), "Stdout must contain alias 'un' candidate, got: {stdout}");
-    assert!(
-        stdout.contains("V\tuninstall\t"),
-        "Stdout must contain 'uninstall' candidate, got: {stdout}"
-    );
-    assert!(
-        stdout.contains("V\tunlink\t"),
-        "Stdout must contain 'unlink' candidate, got: {stdout}"
-    );
+    let candidates: Vec<_> = stdout.lines().filter_map(|line| line.split('\t').nth(1)).collect();
+    assert_eq!(candidates, ["un", "uninstall", "unlink"]);
+    assert!(!stdout.contains("(aliases:"));
 }
 
 #[test]

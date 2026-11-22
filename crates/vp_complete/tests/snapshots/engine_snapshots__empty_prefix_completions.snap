@@ -14,14 +14,14 @@ CompletionOutput {
         CompletionItem {
             value: "install",
             description: Some(
-                "Install project dependencies (aliases: i, add)",
+                "Install project dependencies",
             ),
             kind: Subcommand,
         },
         CompletionItem {
             value: "uninstall",
             description: Some(
-                "Remove dependencies (aliases: unlink, un)",
+                "Remove dependencies",
             ),
             kind: Subcommand,
         },

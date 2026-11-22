@@ -187,7 +187,7 @@ _vp_complete; echo "RES1: ${{COMPREPLY[*]}}"
 COMP_LINE="vp run build:"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp run build:); COMP_CWORD=2
 _vp_complete; echo "RES2: ${{COMPREPLY[*]}}"
 
-COMP_LINE="vp un"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp un); COMP_CWORD=1
+COMP_LINE="vp u"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp u); COMP_CWORD=1
 _vp_complete; echo "RES3: ${{COMPREPLY[*]}}"
 "#,
         bin_dir = sb.bin_dir.display(),
@@ -197,10 +197,7 @@ _vp_complete; echo "RES3: ${{COMPREPLY[*]}}"
     let Some(stdout) = sb.run_bash(&script) else { return };
     assert!(stdout.contains("RES1: watch"), "Bash prefix trimming must yield 'watch': {stdout}");
     assert!(!stdout.contains("build:hijack"), "Bash set -f must prevent glob expansion: {stdout}");
-    assert!(
-        stdout.contains("uninstall") && stdout.contains("unlink") && stdout.contains("un"),
-        "Bash must return all 'un' aliases: {stdout}"
-    );
+    assert!(stdout.lines().any(|line| line.trim_end() == "RES3: uninstall"), "{stdout}");
 }
 
 #[test]
@@ -234,7 +231,7 @@ run_test() {{
   zpty -d pty
 }}
 
-run_test "vp un" "uninstall"
+run_test "vp u" "uninstall"
 run_test "vp run build:wa" "build:watch"
 "#,
         temp_dir = sb.root.display(),
@@ -268,8 +265,8 @@ complete -C "vp run build:"
 
     let Some(stdout) = sb.run_fish(&script) else { return };
     assert!(
-        stdout.contains("uninstall") && stdout.contains("unlink") && stdout.contains("un"),
-        "Fish must complete 'un' aliases: {stdout}"
+        stdout.contains("=== UN ===\nuninstall\tRemove dependencies\n=== BUILD ==="),
+        "{stdout}"
     );
     assert!(
         stdout.contains("build:watch") && stdout.contains("build:*"),
@@ -295,7 +292,9 @@ print $child.stdout
     );
 
     let Some(stdout) = sb.run_nu(&script) else { return };
-    assert!(stdout.contains("uninstall") && stdout.contains("unlink"), "Nu aliases: {stdout}");
+    let completions: Vec<Vec<String>> = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(completions[0].iter().map(|word| word.trim()).collect::<Vec<_>>(), ["uninstall"]);
+    assert_eq!(completions[1].iter().map(|word| word.trim()).collect::<Vec<_>>(), ["uninstall"]);
     assert!(
         stdout.contains("build:watch") && stdout.contains("build:*"),
         "Nu colon tasks: {stdout}"
@@ -329,12 +328,15 @@ Write-Output "UN=$cUn`nEXIT=$savedExit`nEMPTY=$cEmpty`nCOLON=$cColon`nPIPE=$cPip
     );
 
     let Some(stdout) = sb.run_pwsh(&script) else { return };
-    assert!(stdout.contains("uninstall") && stdout.contains("unlink"), "Pwsh aliases: {stdout}");
+    assert!(stdout.lines().any(|line| line == "UN=uninstall"), "Pwsh aliases: {stdout}");
     assert!(stdout.contains("EXIT=37"), "Pwsh must preserve LASTEXITCODE=37: {stdout}");
     assert!(stdout.contains("build:watch") && stdout.contains("build:*"), "Pwsh colon: {stdout}");
     assert!(stdout.contains("PIPE=-First"), "Pwsh must delegate piped completion: {stdout}");
     assert!(stdout.contains("SUB=-LiteralPath"), "Pwsh must delegate $() subexpression: {stdout}");
-    assert!(stdout.contains("uninstall"), "Pwsh native completer must work: {stdout}");
+    assert!(
+        stdout.lines().any(|line| line == "NATIVE=uninstall"),
+        "Pwsh native completer: {stdout}"
+    );
 }
 
 #[test]
@@ -347,8 +349,8 @@ fn test_local_bin_hook_prefers_global_vp() {
         r#"
 export PATH="{bin_dir}:$PATH"
 {hook}
-COMP_LINE="./node_modules/.bin/vp un"; COMP_POINT=${{#COMP_LINE}}
-COMP_WORDS=(./node_modules/.bin/vp un); COMP_CWORD=1
+COMP_LINE="./node_modules/.bin/vp uni"; COMP_POINT=${{#COMP_LINE}}
+COMP_WORDS=(./node_modules/.bin/vp uni); COMP_CWORD=1
 _vp_complete
 echo "BASH_COMPREPLY: ${{COMPREPLY[*]}}"
 "#,
@@ -364,7 +366,7 @@ export PATH="{bin_dir}:$PATH"
 compadd() {{ print -l "${{(@P)${{argv[-1]}}}}"; }}
 _files() {{ :; }}
 {hook}
-words=(./node_modules/.bin/vp un); CURRENT=2; _vp_complete
+words=(./node_modules/.bin/vp uni); CURRENT=2; _vp_complete
 "#,
         hook = ShellDialect::Zsh.adapter().render_hook(),
     )) {
@@ -378,7 +380,7 @@ words=(./node_modules/.bin/vp un); CURRENT=2; _vp_complete
 set -gx PATH "{bin_dir}" $PATH
 {hook}
 builtin complete -c ./node_modules/.bin/vp --keep-order -f -a "(__vp_complete)"
-complete -C "./node_modules/.bin/vp un"
+complete -C "./node_modules/.bin/vp uni"
 "#,
             hook = ShellDialect::Fish.adapter().render_hook(),
         ))
@@ -392,7 +394,7 @@ complete -C "./node_modules/.bin/vp un"
         r#"
 $env.PATH = ($env.PATH | prepend "{bin_dir}")
 source "{hook}"
-print (nu-complete vp "./node_modules/.bin/vp un" {{ command: ["./node_modules/.bin/vp", "un"] }} | get completions.value | to json --raw)
+print (nu-complete vp "./node_modules/.bin/vp uni" {{ command: ["./node_modules/.bin/vp", "uni"] }} | get completions.value | to json --raw)
 "#,
         hook = nu_hook.display(),
     )) {
@@ -405,7 +407,7 @@ print (nu-complete vp "./node_modules/.bin/vp un" {{ command: ["./node_modules/.
         r#"
 $env:PATH = "{bin_dir}" + [IO.Path]::PathSeparator + $env:PATH
 . "{hook}"
-$m = (TabExpansion2 './node_modules/.bin/vp un').CompletionMatches.CompletionText -join ','
+$m = (TabExpansion2 './node_modules/.bin/vp uni').CompletionMatches.CompletionText -join ','
 Write-Output "PWSH_LOCAL=$m"
 "#,
         hook = pwsh_hook.display(),
@@ -426,7 +428,7 @@ fn test_local_node_modules_bin_first_on_path_and_missing_global_vp() {
         r#"
 export PATH="{local_bin}:{bin_dir}:/usr/bin:/bin"
 {hook}
-COMP_LINE="vp un"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp un); COMP_CWORD=1
+COMP_LINE="vp uni"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp uni); COMP_CWORD=1
 _vp_complete; echo "BASH_FIRST: ${{COMPREPLY[*]}}"
 export PATH="{local_bin}:/usr/bin:/bin"
 COMPREPLY=(); _vp_complete; echo "BASH_MISSING: ${{COMPREPLY[*]}}"
@@ -443,7 +445,7 @@ export PATH="{local_bin}:{bin_dir}:/usr/bin:/bin"
 compadd() {{ print -l "${{(@P)${{argv[-1]}}}}"; }}
 _files() {{ :; }}
 {hook}
-words=(vp un); CURRENT=2; _vp_complete
+words=(vp uni); CURRENT=2; _vp_complete
 export PATH="{local_bin}:/usr/bin:/bin"; _vp_complete
 "#,
         hook = ShellDialect::Zsh.adapter().render_hook(),
@@ -456,9 +458,9 @@ export PATH="{local_bin}:/usr/bin:/bin"; _vp_complete
         r#"
 set -gx PATH "{local_bin}" "{bin_dir}" /usr/bin /bin
 {hook}
-complete -C "vp un"
+complete -C "vp uni"
 set -gx PATH "{local_bin}" /usr/bin /bin
-complete -C "vp un"
+complete -C "vp uni"
 "#,
         hook = ShellDialect::Fish.adapter().render_hook(),
     )) {
@@ -471,9 +473,9 @@ complete -C "vp un"
         r#"
 $env.PATH = ["{local_bin}", "{bin_dir}", "/usr/bin", "/bin"]
 source "{hook}"
-let res1 = ("vp un" | commandline complete)
+let res1 = ("vp uni" | commandline complete)
 $env.PATH = ["{local_bin}", "/usr/bin", "/bin"]
-let res2 = ("vp un" | commandline complete)
+let res2 = ("vp uni" | commandline complete)
 print ([$res1, $res2] | to json --raw)
 "#,
         hook = nu_hook.display(),
@@ -487,9 +489,9 @@ print ([$res1, $res2] | to json --raw)
         r#"
 $env:PATH = "{local_bin}" + [IO.Path]::PathSeparator + "{bin_dir}" + [IO.Path]::PathSeparator + "/usr/bin:/bin"
 . "{hook}"
-$m1 = (TabExpansion2 'vp un').CompletionMatches.CompletionText -join ','
+$m1 = (TabExpansion2 'vp uni').CompletionMatches.CompletionText -join ','
 $env:PATH = "{local_bin}" + [IO.Path]::PathSeparator + "/usr/bin:/bin"
-$m2 = (TabExpansion2 'vp un').CompletionMatches.CompletionText -join ','
+$m2 = (TabExpansion2 'vp uni').CompletionMatches.CompletionText -join ','
 Write-Output "PWSH1=$m1`nPWSH2=$m2"
 "#,
         hook = pwsh_hook.display(),
@@ -621,9 +623,7 @@ Write-Output "MID_MATCHES=$midMatches`nMID_SPAN=$($mid.ReplacementIndex):$($mid.
         hook = pwsh_hook.display(),
     )) {
         assert!(
-            stdout.contains("uninstall")
-                && stdout.contains("unlink")
-                && stdout.contains("MID_SPAN=3:9"),
+            stdout.contains("MID_MATCHES=uninstall\n") && stdout.contains("MID_SPAN=3:9"),
             "Pwsh mid-token completion must slice at cursor and replace full token (3:9): {stdout}"
         );
         assert!(
@@ -670,7 +670,7 @@ COMP_LINE="vp node hello"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(vp node hello
 _vp_complete
 echo "BANG_RAW=${{COMPREPLY[0]}}"
 
-COMP_LINE="CI=1 vp un"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(CI=1 vp un); COMP_CWORD=2
+COMP_LINE="CI=1 vp uni"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(CI=1 vp uni); COMP_CWORD=2
 _vp_complete
 echo "ENV_CMD=${{COMPREPLY[*]}}"
 
@@ -698,7 +698,7 @@ echo "BASH_TILDE=${{COMPREPLY[*]}}"
         _vp_complete
         echo "BANG_DQ=${{COMPREPLY[0]}}"
 
-        COMP_LINE="FOO=\$(echo hi there) vp un"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(FOO=x vp un); COMP_CWORD=2
+        COMP_LINE="FOO=\$(echo hi there) vp uni"; COMP_POINT=${{#COMP_LINE}}; COMP_WORDS=(FOO=x vp uni); COMP_CWORD=2
         _vp_complete
         echo "ENV_SUBST=${{COMPREPLY[*]}}"
 

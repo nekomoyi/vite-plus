@@ -10,6 +10,7 @@ function Assert-Completes([string]$Line, [string]$Expected) {
 }
 
 $global:LASTEXITCODE = 19
+Assert-Completes 'vp un' 'un'
 Assert-Completes 'vp un' 'uninstall'
 if ($global:LASTEXITCODE -ne 19) {
     throw "TabExpansion2 clobbered LASTEXITCODE: expected 19, got $global:LASTEXITCODE"

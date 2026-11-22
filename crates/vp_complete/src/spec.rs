@@ -69,13 +69,22 @@ pub struct CompletionRequest {
     pub words: Vec<String>,
     pub current_index: usize,
     pub literal_tilde: bool,
+    /// Include matching aliases even when the canonical subcommand is a candidate.
+    pub(crate) include_aliases_with_canonical: bool,
     pub(crate) bash_cursor: Option<crate::lexer::BashCursor>,
     pub cwd: PathBuf,
 }
 
 impl CompletionRequest {
     pub fn new(words: Vec<String>, current_index: usize, cwd: PathBuf) -> Self {
-        Self { words, current_index, cwd, literal_tilde: false, bash_cursor: None }
+        Self {
+            words,
+            current_index,
+            cwd,
+            literal_tilde: false,
+            include_aliases_with_canonical: false,
+            bash_cursor: None,
+        }
     }
 }
 

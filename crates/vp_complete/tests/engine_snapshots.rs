@@ -64,44 +64,21 @@ fn create_sample_root_spec() -> CmdSpec {
 }
 
 #[test]
-fn test_bimodal_subcommand_alias_matching() {
+fn subcommand_aliases_are_suggested_when_the_command_does_not_match() {
     let root = create_sample_root_spec();
-    let cwd = PathBuf::from("/test");
-
-    // (1) Empty prefix lists visible canonical commands only, with alias hints
-    let req_empty = CompletionRequest::new(vec!["vp".into(), "".into()], 1, cwd.clone());
-    let out_empty = complete(&root, &req_empty);
-
-    let values: Vec<&str> = out_empty.items.iter().map(|it| it.value.as_str()).collect();
-    assert!(values.contains(&"run"), "run should be listed");
-    assert!(values.contains(&"install"), "install should be listed");
-    assert!(values.contains(&"uninstall"), "uninstall should be listed");
-    assert!(!values.contains(&"unlink"), "alias 'unlink' should NOT be listed with empty prefix");
-    assert!(!values.contains(&"un"), "alias 'un' should NOT be listed with empty prefix");
-    assert!(!values.contains(&"rm"), "hidden alias 'rm' should NOT be listed with empty prefix");
-
-    // Verify alias hint in description for uninstall
-    let uninst_item = out_empty.items.iter().find(|it| it.value == "uninstall").unwrap();
-    let desc = uninst_item.description.as_deref().unwrap_or("");
-    assert!(
-        desc.contains("aliases:") && desc.contains("unlink") && desc.contains("un"),
-        "Description should mention aliases: got '{desc}'"
-    );
-
-    // (2) Non-empty prefix "un" returns canonical name AND visible aliases as equal peers:
-    // "un", "uninstall", and "unlink" together!
-    let req_un = CompletionRequest::new(vec!["vp".into(), "un".into()], 1, cwd.clone());
-    let out_un = complete(&root, &req_un);
-    let values_un: Vec<&str> = out_un.items.iter().map(|it| it.value.as_str()).collect();
-    assert!(values_un.contains(&"un"), "visible alias 'un' should be suggested");
-    assert!(values_un.contains(&"uninstall"), "canonical 'uninstall' should be suggested");
-    assert!(values_un.contains(&"unlink"), "visible alias 'unlink' should be suggested");
-
-    // (3) Hidden alias matching when non-empty prefix matches
-    let req_rm = CompletionRequest::new(vec!["vp".into(), "rm".into()], 1, cwd.clone());
-    let out_rm = complete(&root, &req_rm);
-    let values_rm: Vec<&str> = out_rm.items.iter().map(|it| it.value.as_str()).collect();
-    assert!(values_rm.contains(&"rm"), "hidden alias 'rm' should be suggested when prefix matches");
+    let matches = |prefix: &str| {
+        let req =
+            CompletionRequest::new(vec!["vp".into(), prefix.into()], 1, PathBuf::from("/test"));
+        complete(&root, &req).items.into_iter().map(|item| item.value).collect::<Vec<_>>()
+    };
+    assert_eq!(matches("i"), ["install", "implode"]);
+    assert_eq!(matches("ad"), ["add"]);
+    assert_eq!(matches("rm"), ["rm"]);
+    let empty = matches("");
+    assert!(empty.contains(&"install".to_owned()));
+    for alias in ["i", "add", "rm", "un", "unlink"] {
+        assert!(!empty.iter().any(|name| name == alias), "{alias}");
+    }
 }
 
 #[test]

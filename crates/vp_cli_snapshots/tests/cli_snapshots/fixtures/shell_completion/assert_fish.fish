@@ -3,9 +3,14 @@ source home/env.fish
 # 1. vp un
 set -l res_un (complete -C "vp un" | string split -f1 \t)
 echo "vp un -> $res_un"
-builtin contains -- uninstall $res_un; or exit 1
+builtin test (count $res_un) -eq 3; or exit 1
 builtin contains -- unlink $res_un; or exit 1
+builtin contains -- uninstall $res_un; or exit 1
 builtin contains -- un $res_un; or exit 1
+
+set -l install_spellings (complete -C "vp i" | string split -f1 \t)
+builtin contains -- install $install_spellings; or exit 1
+builtin contains -- i $install_spellings; and exit 1
 
 # 2. vp -C packages/subpkg run
 set -l res_sub (complete -C "vp -C packages/subpkg run " | string split -f1 \t)

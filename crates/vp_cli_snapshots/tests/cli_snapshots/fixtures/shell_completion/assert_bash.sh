@@ -21,9 +21,7 @@ test_complete() {
 # 1. vp un
 res_un=$(test_complete "vp un")
 echo "vp un -> $res_un"
-echo "$res_un" | grep -q "uninstall"
-echo "$res_un" | grep -q "unlink"
-echo "$res_un" | grep -q "un"
+[[ "$res_un" == "un uninstall unlink" ]]
 
 # 2. vp -C packages/subpkg run
 res_sub=$(test_complete "vp -C packages/subpkg run ")

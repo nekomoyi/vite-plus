@@ -37,6 +37,7 @@ impl ShellAdapter for ZshAdapter {
         parse_indexed_words_input(env_get, argv, cwd).map_or(
             ShellInputMode::RegistrationHook,
             |mut req| {
+                req.include_aliases_with_canonical = true;
                 super::decode_words(&mut req, |w| unquote_shell_token(w, false, true));
                 // ZLE removes the opening quote from the active word.
                 req.literal_tilde |=
@@ -111,6 +112,11 @@ impl ShellAdapter for ZshAdapter {
         let mut buf = String::with_capacity(out.items.len() * 40 + 8);
         for item in &out.items {
             let raw_disp = sanitize_single_line(&item.value);
+            if item.kind == ItemKind::Subcommand {
+                let description = item.description.as_deref().unwrap_or_default();
+                let _ = writeln!(buf, "C\t{raw_disp}\t{}", sanitize_single_line(description));
+                continue;
+            }
             let is_dir = item.kind == ItemKind::Directory;
             let clean_mat = if is_dir {
                 sanitize_single_line(item.value.strip_suffix('/').unwrap_or(&item.value))
